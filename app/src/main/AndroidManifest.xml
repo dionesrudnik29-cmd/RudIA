@@ -7,7 +7,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RudIA">
         <activity
-            android:name=".MainActivity"
+            android:name="com.rud.ia.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.RudIA">
             <intent-filter>
