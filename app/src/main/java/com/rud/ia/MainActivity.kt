@@ -6,15 +6,18 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
             MaterialTheme {
                 Surface(
@@ -28,17 +31,28 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-data class Message(val text: String, val isUser: Boolean)
+data class Message(
+    val text: String,
+    val isUser: Boolean
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
     var textState by remember { mutableStateOf("") }
+    var isProcessing by remember { mutableStateOf(false) }
+
     val messages = remember {
         mutableStateListOf(
-            Message("Olá! Sou o Rud IA. O modelo local ainda está em configuração.", false)
+            Message(
+                "Olá! Sou o Rud IA. Estou preparado para receber o mecanismo de IA local.",
+                false
+            )
         )
     }
+
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -54,20 +68,27 @@ fun ChatScreen() {
                 .padding(16.dp)
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                reverseLayout = false
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages) { msg ->
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = if (msg.isUser) Arrangement.End else Arrangement.Start
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = if (msg.isUser) {
+                            Arrangement.End
+                        } else {
+                            Arrangement.Start
+                        }
                     ) {
                         Surface(
-                            color = if (msg.isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                            color = if (msg.isUser) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            },
                             shape = MaterialTheme.shapes.medium
                         ) {
                             Text(
@@ -76,6 +97,12 @@ fun ChatScreen() {
                             )
                         }
                     }
+                }
+            }
+
+            LaunchedEffect(messages.size) {
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.lastIndex)
                 }
             }
 
@@ -89,15 +116,39 @@ fun ChatScreen() {
                     value = textState,
                     onValueChange = { textState = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Digite sua mensagem...") }
+                    placeholder = {
+                        Text("Converse com o Rud IA...")
+                    },
+                    enabled = !isProcessing,
+                    maxLines = 4
                 )
+
                 Spacer(modifier = Modifier.width(8.dp))
+
                 Button(
+                    enabled = textState.isNotBlank() && !isProcessing,
                     onClick = {
-                        if (textState.isNotBlank()) {
-                            messages.add(Message(textState, true))
+                        val question = textState.trim()
+
+                        if (question.isNotEmpty()) {
+                            messages.add(Message(question, true))
                             textState = ""
-                            messages.add(Message("O modelo local de IA ainda está a ser integrado.", false))
+                            isProcessing = true
+
+                            messages.add(
+                                Message(
+                                    "O mecanismo de IA local será conectado na próxima etapa.",
+                                    false
+                                )
+                            )
+
+                            isProcessing = false
+
+                            scope.launch {
+                                listState.animateScrollToItem(
+                                    messages.lastIndex
+                                )
+                            }
                         }
                     }
                 ) {
