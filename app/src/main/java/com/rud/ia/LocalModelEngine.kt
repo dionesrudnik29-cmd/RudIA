@@ -13,6 +13,7 @@ enum class ModelRuntimeState {
 class LocalModelEngine(private val context: Context) {
     private val modelDir: File = File(context.filesDir, "models")
     private val modelFile: File = File(modelDir, "Qwen3-4B-Q4_K_M.gguf")
+    val officialModelUrl: String = "https://huggingface.co/Qwen/Qwen3-4B-GGUF"
 
     var state: ModelRuntimeState = ModelRuntimeState.NOT_DOWNLOADED
         private set
@@ -49,8 +50,25 @@ class LocalModelEngine(private val context: Context) {
             ModelRuntimeState.READY -> "Modelo local pronto: Qwen3-4B GGUF Q4_K_M detectado e bridge nativa ativa."
             ModelRuntimeState.LOADING -> "Carregando modelo local Qwen3-4B..."
             ModelRuntimeState.ERROR -> "Erro ao preparar o modelo local. Verifique o arquivo GGUF, a memória do aparelho e a compatibilidade da ABI."
-            ModelRuntimeState.NOT_DOWNLOADED -> "Modelo local ausente. Baixe o arquivo GGUF Qwen3-4B Q4_K_M para rodar offline."
+            ModelRuntimeState.NOT_DOWNLOADED -> "Modelo local ausente. Baixe o arquivo GGUF Qwen3-4B Q4_K_M do repositório oficial para rodar offline."
         }
+    }
+
+    fun downloadInstructionText(): String {
+        return "Para baixar o modelo, use a página oficial do Qwen3-4B GGUF: $officialModelUrl. " +
+            "Selecione a quantização Q4_K_M e salve o arquivo em app-specific storage antes de carregar o runtime."
+    }
+
+    fun downloadModel(): Result<String> {
+        if (!modelFile.exists()) {
+            return Result.success(
+                "Download do modelo ainda não foi executado automaticamente. " +
+                    "Use o botão de download para iniciar a etapa oficial do modelo GGUF Qwen3-4B Q4_K_M. " +
+                    "Repositório oficial: $officialModelUrl"
+            )
+        }
+
+        return Result.success("Modelo localizado em ${modelFile.absolutePath}")
     }
 
     fun generate(prompt: String): Result<String> {
