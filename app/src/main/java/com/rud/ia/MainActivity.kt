@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -39,13 +40,17 @@ data class Message(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
+    val context = LocalContext.current
+    val modelEngine = remember(context) { LocalModelEngine(context) }
+
     var textState by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
+    var modelStatus by remember { mutableStateOf(modelEngine.statusText()) }
 
     val messages = remember {
         mutableStateListOf(
             Message(
-                "Olá! Sou o Rud IA. Estou preparado para receber o mecanismo de IA local.",
+                "Olá! Sou o Rud IA. Estou pronto para receber o mecanismo de IA local.",
                 false
             )
         )
@@ -53,6 +58,10 @@ fun ChatScreen() {
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(modelEngine) {
+        modelStatus = modelEngine.statusText()
+    }
 
     Scaffold(
         topBar = {
@@ -67,6 +76,20 @@ fun ChatScreen() {
                 .padding(paddingValues)
                 .padding(16.dp)
         ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text(
+                    text = modelStatus,
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -130,25 +153,32 @@ fun ChatScreen() {
                     onClick = {
                         val question = textState.trim()
 
-                        if (question.isNotEmpty()) {
-                            messages.add(Message(question, true))
-                            textState = ""
-                            isProcessing = true
+                        if (question.isEmpty()) return@Button
 
+                        messages.add(Message(question, true))
+                        textState = ""
+                        isProcessing = true
+                        modelStatus = modelEngine.statusText()
+
+                        val response = modelEngine.generate(question)
+
+                        if (response.isSuccess) {
+                            messages.add(Message(response.getOrThrow(), false))
+                        } else {
                             messages.add(
                                 Message(
-                                    "O mecanismo de IA local será conectado na próxima etapa.",
+                                    response.exceptionOrNull()?.message
+                                        ?: "Não foi possível processar a mensagem no momento.",
                                     false
                                 )
                             )
+                        }
 
-                            isProcessing = false
+                        isProcessing = false
+                        modelStatus = modelEngine.statusText()
 
-                            scope.launch {
-                                listState.animateScrollToItem(
-                                    messages.lastIndex
-                                )
-                            }
+                        scope.launch {
+                            listState.animateScrollToItem(messages.lastIndex)
                         }
                     }
                 ) {
