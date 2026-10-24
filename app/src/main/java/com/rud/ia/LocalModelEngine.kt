@@ -18,54 +18,88 @@ class LocalModelEngine(private val context: Context) {
         private set
 
     init {
+        modelDir.mkdirs()
         refreshState()
     }
 
+    private external fun nativeLoadModel(modelPath: String): Boolean
+    private external fun nativeGenerate(prompt: String): String
+    private external fun nativeReleaseModel()
+
     fun refreshState() {
-        state = if (modelFile.exists()) {
-            ModelRuntimeState.READY
-        } else {
-            ModelRuntimeState.NOT_DOWNLOADED
+        if (!modelFile.exists()) {
+            state = ModelRuntimeState.NOT_DOWNLOADED
+            return
+        }
+
+        try {
+            state = if (nativeLoadModel(modelFile.absolutePath)) {
+                ModelRuntimeState.READY
+            } else {
+                ModelRuntimeState.ERROR
+            }
+        } catch (_: UnsatisfiedLinkError) {
+            state = ModelRuntimeState.ERROR
         }
     }
 
     fun statusText(): String {
         refreshState()
         return when (state) {
-            ModelRuntimeState.READY -> "Modelo local pronto: Qwen3-4B GGUF Q4_K_M detectado."
+            ModelRuntimeState.READY -> "Modelo local pronto: Qwen3-4B GGUF Q4_K_M detectado e bridge nativa ativa."
             ModelRuntimeState.LOADING -> "Carregando modelo local Qwen3-4B..."
-            ModelRuntimeState.ERROR -> "Erro ao preparar o modelo local."
-            ModelRuntimeState.NOT_DOWNLOADED -> "Modelo local ausente. O download do Qwen3-4B GGUF Q4_K_M e a integração com llama.cpp ainda precisam ser concluídos."
+            ModelRuntimeState.ERROR -> "Erro ao preparar o modelo local. Verifique o arquivo GGUF, a memória do aparelho e a compatibilidade da ABI."
+            ModelRuntimeState.NOT_DOWNLOADED -> "Modelo local ausente. Baixe o arquivo GGUF Qwen3-4B Q4_K_M para rodar offline."
         }
     }
 
     fun generate(prompt: String): Result<String> {
+        val text = prompt.trim()
+        if (text.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Digite uma mensagem antes de enviar."))
+        }
+
         refreshState()
 
-        return when (state) {
-            ModelRuntimeState.READY -> {
-                Result.success(
-                    "A integração real do Qwen3-4B via llama.cpp ainda não foi concluída. " +
-                        "O runtime nativo será conectado nesta etapa de desenvolvimento.\n\n" +
-                        "Prompt recebido: $prompt"
+        if (state == ModelRuntimeState.NOT_DOWNLOADED) {
+            return Result.failure(
+                IllegalStateException(
+                    "Modelo local ausente. Baixe o pacote Qwen3-4B-GGUF Q4_K_M antes de gerar respostas."
                 )
-            }
-            ModelRuntimeState.NOT_DOWNLOADED -> {
-                Result.failure(
-                    IllegalStateException(
-                        "Modelo local ausente. Baixe o arquivo Qwen3-4B GGUF Q4_K_M e configure o runtime nativo para iniciar a geração real."
-                    )
+            )
+        }
+
+        if (state == ModelRuntimeState.ERROR) {
+            return Result.failure(
+                IllegalStateException(
+                    "O runtime nativo falhou ao carregar o modelo. Verifique o arquivo do modelo e a memória disponível."
                 )
-            }
-            ModelRuntimeState.LOADING -> {
-                Result.failure(
-                    IllegalStateException("O modelo está sendo carregado. Aguarde a finalização do processo.")
-                )
-            }
-            ModelRuntimeState.ERROR -> {
-                Result.failure(
-                    IllegalStateException("O motor local falhou ao inicializar. Verifique a memória e o arquivo do modelo.")
-                )
+            )
+        }
+
+        return try {
+            Result.success(nativeGenerate(text))
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
+    }
+
+    fun releaseModel() {
+        try {
+            nativeReleaseModel()
+        } catch (_: UnsatisfiedLinkError) {
+            // bridge not yet linked; safe no-op during native runtime bootstrap
+        }
+
+        state = ModelRuntimeState.NOT_DOWNLOADED
+    }
+
+    companion object {
+        init {
+            try {
+                System.loadLibrary("rud_llama_jni")
+            } catch (_: UnsatisfiedLinkError) {
+                // Library is expected to become available as soon as the native target is built.
             }
         }
     }
