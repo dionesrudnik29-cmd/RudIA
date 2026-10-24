@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.rudia.chatbot"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.rudia.chatbot"
