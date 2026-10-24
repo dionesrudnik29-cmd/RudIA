@@ -1,5 +1,7 @@
 package com.rud.ia
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,6 +48,7 @@ fun ChatScreen() {
     var textState by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
     var modelStatus by remember { mutableStateOf(modelEngine.statusText()) }
+    var modelInstruction by remember { mutableStateOf(modelEngine.downloadInstructionText()) }
 
     val messages = remember {
         mutableStateListOf(
@@ -61,6 +64,7 @@ fun ChatScreen() {
 
     LaunchedEffect(modelEngine) {
         modelStatus = modelEngine.statusText()
+        modelInstruction = modelEngine.downloadInstructionText()
     }
 
     Scaffold(
@@ -81,11 +85,56 @@ fun ChatScreen() {
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = MaterialTheme.shapes.medium
             ) {
-                Text(
-                    text = modelStatus,
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = modelStatus,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = modelInstruction,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        val browserIntent = Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse(modelEngine.officialModelUrl)
+                        )
+
+                        val resolved = browserIntent.resolveActivity(context.packageManager)
+                        if (resolved != null) {
+                            context.startActivity(browserIntent)
+                        }
+
+                        modelStatus = modelEngine.statusText()
+                        modelInstruction = modelEngine.downloadInstructionText()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Baixar modelo")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        modelStatus = modelEngine.statusText()
+                        modelInstruction = modelEngine.downloadInstructionText()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Atualizar status")
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
