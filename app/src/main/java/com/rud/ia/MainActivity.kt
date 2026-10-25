@@ -1,11 +1,7 @@
 
 package com.rud.ia
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -23,7 +19,6 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContent {
             MaterialTheme {
                 Surface(
@@ -37,16 +32,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-data class Message(
-    val text: String,
-    val isUser: Boolean
-)
+data class Message(val text: String, val isUser: Boolean)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen() {
     val context = LocalContext.current
     val modelEngine = remember(context) { LocalModelEngine(context) }
+    val scope = rememberCoroutineScope()
 
     var textState by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
@@ -55,29 +48,24 @@ fun ChatScreen() {
         mutableStateOf(modelEngine.downloadInstructionText())
     }
 
+    var showDownloadDialog by remember { mutableStateOf(false) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableIntStateOf(0) }
+    var downloadMessage by remember { mutableStateOf("") }
+
     val messages = remember {
         mutableStateListOf(
             Message(
-                "Olá! Sou o Rud IA. Estou pronto para receber o mecanismo de IA local.",
+                "Olá! Sou o Rud IA. Baixe o modelo para começar a usar a IA local.",
                 false
             )
         )
     }
 
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(modelEngine) {
-        modelStatus = modelEngine.statusText()
-        modelInstruction = modelEngine.downloadInstructionText()
-    }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Rud IA") }
-            )
-        }
+        topBar = { TopAppBar(title = { Text("Rud IA") }) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -90,75 +78,69 @@ fun ChatScreen() {
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = MaterialTheme.shapes.medium
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = modelStatus,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = modelInstruction,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                Column(Modifier.padding(12.dp)) {
+                    Text(modelStatus, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text(modelInstruction, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
+                    modifier = Modifier.weight(1f),
                     onClick = {
-                        try {
-                            val browserIntent = Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse(modelEngine.officialModelUrl)
-                            )
-                            context.startActivity(browserIntent)
-                        } catch (_: ActivityNotFoundException) {
-                            Toast.makeText(
-                                context,
-                                "Nenhum navegador encontrado para abrir o link.",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        } catch (e: Exception) {
-                            Toast.makeText(
-                                context,
-                                "Erro ao abrir o link: ${e.message ?: "erro desconhecido"}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
+                        if (isDownloading) return@Button
 
-                        modelStatus = modelEngine.statusText()
-                        modelInstruction = modelEngine.downloadInstructionText()
-                    },
-                    modifier = Modifier.weight(1f)
+                        showDownloadDialog = true
+                        isDownloading = true
+                        downloadProgress = 0
+                        downloadMessage = "Conectando ao servidor..."
+
+                        scope.launch {
+                            val result = modelEngine.downloadModel { progress ->
+                                downloadProgress = progress
+                                downloadMessage = "Baixando modelo... $progress%"
+                            }
+
+                            isDownloading = false
+
+                            if (result.isSuccess) {
+                                downloadProgress = 100
+                                downloadMessage = result.getOrThrow()
+                                modelStatus = modelEngine.statusText()
+                            } else {
+                                downloadMessage =
+                                    result.exceptionOrNull()?.message
+                                        ?: "O download falhou."
+                            }
+                        }
+                    }
                 ) {
-                    Text("Baixar modelo")
+                    Text(if (isDownloading) "Baixando..." else "Baixar modelo")
                 }
 
                 OutlinedButton(
+                    modifier = Modifier.weight(1f),
                     onClick = {
+                        modelEngine.refreshState()
                         modelStatus = modelEngine.statusText()
                         modelInstruction = modelEngine.downloadInstructionText()
-                    },
-                    modifier = Modifier.weight(1f)
+                    }
                 ) {
                     Text("Atualizar status")
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
 
             LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages) { msg ->
@@ -178,10 +160,7 @@ fun ChatScreen() {
                             },
                             shape = MaterialTheme.shapes.medium
                         ) {
-                            Text(
-                                text = msg.text,
-                                modifier = Modifier.padding(12.dp)
-                            )
+                            Text(msg.text, Modifier.padding(12.dp))
                         }
                     }
                 }
@@ -194,57 +173,51 @@ fun ChatScreen() {
             }
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
                     value = textState,
                     onValueChange = { textState = it },
                     modifier = Modifier.weight(1f),
-                    placeholder = {
-                        Text("Converse com o Rud IA...")
-                    },
+                    placeholder = { Text("Converse com o Rud IA...") },
                     enabled = !isProcessing,
                     maxLines = 4
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(Modifier.width(8.dp))
 
                 Button(
                     enabled = textState.isNotBlank() && !isProcessing,
                     onClick = {
                         val question = textState.trim()
-
                         if (question.isEmpty()) return@Button
 
                         messages.add(Message(question, true))
                         textState = ""
                         isProcessing = true
-                        modelStatus = modelEngine.statusText()
-
-                        val response = modelEngine.generate(question)
-
-                        if (response.isSuccess) {
-                            messages.add(
-                                Message(response.getOrThrow(), false)
-                            )
-                        } else {
-                            messages.add(
-                                Message(
-                                    response.exceptionOrNull()?.message
-                                        ?: "Não foi possível processar a mensagem.",
-                                    false
-                                )
-                            )
-                        }
-
-                        isProcessing = false
-                        modelStatus = modelEngine.statusText()
 
                         scope.launch {
-                            listState.animateScrollToItem(messages.lastIndex)
+                            val response = kotlinx.coroutines.withContext(
+                                kotlinx.coroutines.Dispatchers.IO
+                            ) {
+                                modelEngine.generate(question)
+                            }
+
+                            if (response.isSuccess) {
+                                messages.add(Message(response.getOrThrow(), false))
+                            } else {
+                                messages.add(
+                                    Message(
+                                        response.exceptionOrNull()?.message
+                                            ?: "Não foi possível processar a mensagem.",
+                                        false
+                                    )
+                                )
+                            }
+
+                            isProcessing = false
+                            modelStatus = modelEngine.statusText()
                         }
                     }
                 ) {
@@ -253,5 +226,40 @@ fun ChatScreen() {
             }
         }
     }
+
+    if (showDownloadDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isDownloading) showDownloadDialog = false
+            },
+            title = {
+                Text(if (isDownloading) "Baixando modelo" else "Download do modelo")
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(downloadMessage)
+
+                    LinearProgressIndicator(
+                        progress = { downloadProgress / 100f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text("$downloadProgress%")
+                    Text(
+                        "Mantenha o aplicativo aberto durante o download.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                if (!isDownloading) {
+                    TextButton(
+                        onClick = { showDownloadDialog = false }
+                    ) {
+                        Text("Fechar")
+                    }
+                }
+            }
+        )
+    }
 }
-                     
