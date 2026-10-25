@@ -4,535 +4,436 @@ package com.rud.ia
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val Void = Color(0xFF080611)
-private val Panel = Color(0xFF151025)
-private val Violet = Color(0xFF7C3AED)
-private val Neon = Color(0xFFB56BFF)
-private val Lilac = Color(0xFFD9C2FF)
-private val Muted = Color(0xFFA99BBF)
-private val BorderViolet = Color(0xFF56318F)
+private val Background = Color(0xFF0B0714)
+private val Panel = Color(0xFF191027)
+private val Violet = Color(0xFF9B5CFF)
+private val Neon = Color(0xFFC5A0FF)
+private val TextWhite = Color(0xFFF7F1FF)
+private val Muted = Color(0xFFB9AACD)
 
 private val RudColors = darkColorScheme(
-    primary = Neon,
-    onPrimary = Color.White,
-    secondary = Violet,
-    background = Void,
+    primary = Violet,
+    secondary = Neon,
+    background = Background,
     surface = Panel,
-    onBackground = Color.White,
-    onSurface = Color.White,
-    surfaceVariant = Color(0xFF211735),
-    onSurfaceVariant = Lilac
+    onPrimary = Color.White,
+    onBackground = TextWhite,
+    onSurface = TextWhite
 )
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.rgb(8, 6, 17)
-        window.navigationBarColor = android.graphics.Color.rgb(8, 6, 17)
 
         setContent {
             MaterialTheme(colorScheme = RudColors) {
-                ChatScreen()
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Background
+                ) {
+                    ChatScreen()
+                }
             }
         }
     }
 }
 
-data class Message(val text: String, val isUser: Boolean)
+private data class ChatMessage(
+    val text: String,
+    val isUser: Boolean
+)
 
 @Composable
-private fun NeonPanel(
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    val transition = rememberInfiniteTransition(label = "neon")
-    val glow by transition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glow"
-    )
-
-    Column(
-        modifier = modifier
-            .shadow(
-                elevation = (5 + glow * 7).dp,
-                shape = RoundedCornerShape(22.dp),
-                ambientColor = Violet.copy(alpha = 0.25f),
-                spotColor = Neon.copy(alpha = 0.30f)
-            )
-            .clip(RoundedCornerShape(22.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF201431),
-                        Color(0xFF100C20),
-                        Color(0xFF171026)
-                    )
-                )
-            )
-            .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Neon.copy(alpha = glow),
-                        BorderViolet.copy(alpha = 0.65f),
-                        Color(0xFF8B5CF6).copy(alpha = glow)
-                    )
-                ),
-                shape = RoundedCornerShape(22.dp)
-            )
-            .padding(16.dp),
-        content = content
-    )
-}
-
-@Composable
-private fun NeonButton(
-    label: String,
-    symbol: String,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    onClick: () -> Unit
-) {
-    val shape = RoundedCornerShape(16.dp)
-
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier
-            .heightIn(min = 54.dp)
-            .shadow(
-                elevation = 5.dp,
-                shape = shape,
-                ambientColor = Violet.copy(alpha = 0.35f)
-            )
-            .border(1.dp, BorderViolet, shape),
-        shape = shape,
-        color = Color(0xFF191127)
-    ) {
-        Row(
-            modifier = Modifier.padding(
-                horizontal = 10.dp,
-                vertical = 10.dp
-            ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = symbol,
-                fontSize = 21.sp,
-                color = Neon
-            )
-            Spacer(Modifier.width(7.dp))
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                color = if (enabled) Lilac else Muted,
-                fontWeight = FontWeight.Medium
-            )
-        }
-    }
-}
-
-@Composable
-fun ChatScreen() {
-    val context = LocalContext.current
-    val modelEngine = remember(context) { LocalModelEngine(context) }
+private fun ChatScreen() {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
-    var textState by remember { mutableStateOf("") }
-    var isProcessing by remember { mutableStateOf(false) }
-    var modelStatus by remember { mutableStateOf(modelEngine.statusText()) }
-    var modelInstruction by remember {
-        mutableStateOf(modelEngine.downloadInstructionText())
+    val engine = remember(context) {
+        LocalModelEngine(context.applicationContext)
     }
-
-    var showDownloadDialog by remember { mutableStateOf(false) }
-    var isDownloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableIntStateOf(0) }
-    var downloadMessage by remember { mutableStateOf("") }
 
     val messages = remember {
         mutableStateListOf(
-            Message(
-                "Olá! Sou o Rud IA. Baixe o modelo para começar a usar a inteligência artificial local.",
+            ChatMessage(
+                "Olá! Sou o Rud IA. Carregue o modelo local para começar.",
                 false
             )
         )
     }
 
-    val listState = rememberLazyListState()
+    var input by remember { mutableStateOf("") }
+    var status by remember {
+        mutableStateOf("Verificando modelo...")
+    }
+    var busy by remember { mutableStateOf(false) }
+    var downloading by remember { mutableStateOf(false) }
+    var progress by remember { mutableIntStateOf(0) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
 
-    Box(
+    fun refreshStatus() {
+        if (busy || downloading) return
+
+        busy = true
+        status = "Verificando modelo..."
+
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    engine.refreshState()
+                }
+                status = engine.statusText()
+            } catch (e: Exception) {
+                status = "Erro: ${e.message ?: "não foi possível verificar"}"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun downloadModel() {
+        if (busy || downloading) return
+
+        downloading = true
+        progress = 0
+        showDownloadDialog = true
+        status = "Baixando modelo..."
+
+        scope.launch {
+            try {
+                val result = engine.downloadModel { value ->
+                    scope.launch(Dispatchers.Main) {
+                        progress = value
+                    }
+                }
+
+                result.fold(
+                    onSuccess = { message ->
+                        status = message
+                    },
+                    onFailure = { error ->
+                        status = "Falha no download: ${
+                            error.message ?: "erro desconhecido"
+                        }"
+                    }
+                )
+            } catch (e: Exception) {
+                status = "Falha no download: ${
+                    e.message ?: "erro desconhecido"
+                }"
+            } finally {
+                downloading = false
+                showDownloadDialog = false
+            }
+        }
+    }
+
+    fun sendMessage() {
+        val prompt = input.trim()
+
+        if (prompt.isEmpty() || busy || downloading) return
+
+        input = ""
+        messages.add(ChatMessage(prompt, true))
+        messages.add(ChatMessage("Pensando...", false))
+        busy = true
+
+        scope.launch {
+            try {
+                val answer = withContext(Dispatchers.IO) {
+                    if (engine.state != ModelRuntimeState.READY) {
+                        engine.refreshState()
+                    }
+
+                    if (engine.state != ModelRuntimeState.READY) {
+                        "O modelo não está pronto. Use Atualizar status para tentar carregá-lo."
+                    } else {
+                        engine.generate(prompt).getOrElse { error ->
+                            "Erro ao gerar resposta: ${
+                                error.message ?: "falha no modelo"
+                            }"
+                        }
+                    }
+                }
+
+                if (messages.isNotEmpty()) {
+                    messages.removeAt(messages.lastIndex)
+                }
+                messages.add(ChatMessage(answer, false))
+                status = engine.statusText()
+            } catch (e: Exception) {
+                if (messages.isNotEmpty()) {
+                    messages.removeAt(messages.lastIndex)
+                }
+                messages.add(
+                    ChatMessage(
+                        "Erro: ${e.message ?: "não foi possível gerar a resposta"}",
+                        false
+                    )
+                )
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF120A22),
-                        Void,
-                        Color(0xFF0D0819)
-                    )
-                )
-            )
+            .background(Background)
+            .padding(16.dp)
     ) {
+        Text(
+            text = "RUD IA",
+            fontSize = 30.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Neon
+        )
+
+        Text(
+            text = "INTELIGÊNCIA ARTIFICIAL LOCAL",
+            fontSize = 11.sp,
+            color = Muted
+        )
+
+        Spacer(Modifier.height(16.dp))
+
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 8.dp)
+                .fillMaxWidth()
+                .background(Panel, RoundedCornerShape(16.dp))
+                .padding(14.dp)
         ) {
-            // Cabeçalho
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .shadow(
-                            10.dp,
-                            CircleShape,
-                            ambientColor = Violet,
-                            spotColor = Neon
-                        )
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(Violet, Color(0xFF32145C))
-                            )
-                        )
-                        .border(1.dp, Neon, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("✧", fontSize = 31.sp, color = Color.White)
-                }
+            Text(
+                text = "MODELO LOCAL",
+                fontWeight = FontWeight.Bold,
+                color = Neon
+            )
 
-                Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.height(6.dp))
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "Rud ",
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            "IA",
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Neon
-                        )
-                    }
-                    Text(
-                        "SUA INTELIGÊNCIA LOCAL",
-                        fontSize = 9.sp,
-                        letterSpacing = 2.sp,
-                        color = Muted
-                    )
-                }
+            Text(
+                text = status,
+                color = TextWhite,
+                fontSize = 13.sp
+            )
 
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color(0xFF201431))
-                        .border(1.dp, BorderViolet, CircleShape)
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text("LOCAL", fontSize = 10.sp, color = Lilac)
-                }
-            }
+            Spacer(Modifier.height(12.dp))
 
-            Spacer(Modifier.height(8.dp))
-
-            // Cartão do modelo
-            NeonPanel(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFF30204B))
-                            .border(
-                                1.dp,
-                                BorderViolet,
-                                RoundedCornerShape(14.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("◈", fontSize = 27.sp, color = Neon)
-                    }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "MODELO LOCAL",
-                            fontSize = 10.sp,
-                            letterSpacing = 1.5.sp,
-                            color = Muted
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            modelStatus,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Lilac,
-                            maxLines = 2
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (modelStatus.contains(
-                                        "pronto",
-                                        ignoreCase = true
-                                    ) ||
-                                    modelStatus.contains(
-                                        "carregado",
-                                        ignoreCase = true
-                                    )
-                                ) Color(0xFF4DE6B0)
-                                else Neon
-                            )
-                    )
-                }
-
-                Spacer(Modifier.height(10.dp))
-
-                Text(
-                    modelInstruction,
-                    fontSize = 11.sp,
-                    color = Muted
-                )
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // Controles do modelo
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                NeonButton(
-                    label = if (isDownloading) "Baixando..." else "Baixar modelo",
-                    symbol = "↓",
+                Button(
+                    onClick = { downloadModel() },
+                    enabled = !busy && !downloading,
                     modifier = Modifier.weight(1f),
-                    enabled = !isDownloading && !isProcessing
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Violet
+                    )
                 ) {
-                    showDownloadDialog = true
-                    isDownloading = true
-                    downloadProgress = 0
-                    downloadMessage = "Conectando ao servidor..."
-
-                    scope.launch {
-                        try {
-                            val result = modelEngine.downloadModel { progress ->
-                                scope.launch(Dispatchers.Main) {
-                                    downloadProgress = progress
-                                    downloadMessage =
-                                        "Baixando modelo... $progress%"
-                                }
-                            }
-
-                            if (result.isSuccess) {
-                                downloadProgress = 100
-                                downloadMessage = result.getOrThrow()
-                                modelStatus = modelEngine.statusText()
-                                modelInstruction =
-                                    modelEngine.downloadInstructionText()
-                            } else {
-                                downloadMessage =
-                                    result.exceptionOrNull()?.message
-                                        ?: "O download falhou."
-                            }
-                        } catch (e: Exception) {
-                            downloadMessage =
-                                "Erro no download: ${e.message ?: "falha inesperada"}"
-                        } finally {
-                            isDownloading = false
-                        }
-                    }
+                    Text("Baixar modelo")
                 }
 
-                NeonButton(
-                    label = "Atualizar status",
-                    symbol = "↻",
+                Button(
+                    onClick = { refreshStatus() },
+                    enabled = !busy && !downloading,
                     modifier = Modifier.weight(1f),
-                    enabled = !isProcessing && !isDownloading
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF38244F)
+                    )
                 ) {
-                    isProcessing = true
-
-                    scope.launch {
-                        try {
-                            val result = withContext(Dispatchers.IO) {
-                                modelEngine.refreshState()
-                                Pair(
-                                    modelEngine.statusText(),
-                                    modelEngine.downloadInstructionText()
-                                )
-                            }
-                            modelStatus = result.first
-                            modelInstruction = result.second
-                        } catch (e: Exception) {
-                            modelStatus =
-                                "Erro ao verificar: ${e.message ?: "desconhecido"}"
-                        } finally {
-                            isProcessing = false
-                        }
-                    }
+                    Text("Atualizar status")
                 }
             }
+        }
 
-            Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(16.dp))
 
-            // Área de conversa
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "CONVERSA",
-                    fontSize = 10.sp,
-                    letterSpacing = 2.sp,
-                    color = Muted,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(1.dp)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(BorderViolet, Color.Transparent)
-                            )
-                        )
-                )
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(messages) { message ->
+                MessageBubble(message)
             }
+        }
 
-            Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f),
+                enabled = !busy && !downloading,
+                placeholder = {
+                    Text("Digite sua mensagem...", color = Muted)
+                },
+                shape = RoundedCornerShape(16.dp),
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Send
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = { sendMessage() }
+                ),
+                maxLines = 4
+            )
+
+            Button(
+                onClick = { sendMessage() },
+                enabled = input.isNotBlank() && !busy && !downloading,
+                modifier = Modifier.size(54.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Violet
+                )
             ) {
-                items(messages) { msg ->
-                    AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn(tween(250)) +
-                            slideInVertically(
-                                initialOffsetY = { it / 5 },
-                                animationSpec = tween(250)
-                            )
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = if (msg.isUser) {
-                                Arrangement.End
-                            } else {
-                                Arrangement.Start
-                            },
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            if (!msg.isUser) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(top = 3.dp)
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF281642))
-                                        .border(1.dp, BorderViolet, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("✧", fontSize = 20.sp, color = Neon)
-                                }
-                                Spacer(Modifier.width(8.dp))
-                            }
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("➤", fontSize = 22.sp)
+                }
+            }
+        }
 
-                            Column(
-                                modifier = Modifier.widthIn(max = 290.dp),
-                                horizontalAlignment = if (msg.isUser) {
-                                    Alignment.End
-                                } else {
-                                    Alignment.Start
-                                }
-                            ) {
-                                Text(
-                                    if (msg.isUser) "VOCÊ" else "RUD IA",
-                                    fontSize = 9.sp,
-                                    letterSpacing = 1.5.sp,
-                                    color = if (msg.isUser) Neon else Muted
-                                )
+        Spacer(Modifier.height(6.dp))
 
-                                Spacer(Modifier.height(5.dp))
+        Text(
+            text = "O processamento local pode demorar dependendo do aparelho.",
+            color = Muted,
+            fontSize = 10.sp
+        )
+    }
 
-                                Box(
-                                    modifier = Modifier
-                                        .shadow(
-                                            4.dp,
-                                            RoundedCornerShape(18.dp),
-                                            ambientColor = Violet.copy(alpha = 0.2f)
-                                        )
-                                        .clip(
-                                            RoundedCornerShape(
-                                                topStart = 18.dp,
-                                                topEnd = 18.dp,
-                                                bottomStart = if (msg.isUser) 18.dp else 5.dp,
-                                                bottomEnd = if (msg.isUser) 5.dp else 18.dp
-                                            )
-                                        )
-                                
+    if (showDownloadDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                // O download continua até terminar.
+            },
+            title = { Text("Baixando modelo") },
+            text = {
+                Column {
+                    Text("$progress% concluído")
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Neon
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "O arquivo pode ter vários gigabytes. Mantenha a conexão ativa.",
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+}
+
+@Composable
+private fun MessageBubble(message: ChatMessage) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (message.isUser) {
+            Alignment.End
+        } else {
+            Alignment.Start
+        }
+    ) {
+        Text(
+            text = if (message.isUser) "VOCÊ" else "RUD IA",
+            color = Neon,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .background(
+                    color = if (message.isUser) {
+                        Color(0xFF38244F)
+                    } else {
+                        Panel
+                    },
+                    shape = RoundedCornerShape(14.dp)
+                )
+                .padding(12.dp)
+        ) {
+            Text(
+                text = message.text,
+                color = TextWhite,
+                fontSize = 14.sp
+            )
+        }
+    }
+}
