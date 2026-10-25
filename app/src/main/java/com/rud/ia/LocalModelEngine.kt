@@ -1,7 +1,12 @@
+
 package com.rud.ia
 
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 enum class ModelRuntimeState {
     NOT_DOWNLOADED,
@@ -11,104 +16,145 @@ enum class ModelRuntimeState {
 }
 
 class LocalModelEngine(private val context: Context) {
-    private val modelDir: File = File(context.filesDir, "models")
-    private val modelFile: File = File(modelDir, "Qwen3-4B-Q4_K_M.gguf")
-    val officialModelUrl: String = "https://huggingface.co/Qwen/Qwen3-4B-GGUF"
+    private val modelDir = File(context.filesDir, "models")
+    private val modelFile = File(modelDir, "Qwen3-4B-Q4_K_M.gguf")
+
+    private val modelUrl =
+        "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true"
+
+    val officialModelUrl = modelUrl
 
     var state: ModelRuntimeState = ModelRuntimeState.NOT_DOWNLOADED
         private set
 
     init {
         modelDir.mkdirs()
-        refreshState()
+        if (modelFile.exists() && modelFile.length() > 0) {
+            state = ModelRuntimeState.NOT_DOWNLOADED
+        }
     }
 
     private external fun nativeLoadModel(modelPath: String): Boolean
     private external fun nativeGenerate(prompt: String): String
     private external fun nativeReleaseModel()
 
+    suspend fun downloadModel(
+        onProgress: (Int) -> Unit
+    ): Result<String> = withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
+
+        try {
+            modelDir.mkdirs()
+            val tempFile = File(modelDir, modelFile.name + ".part")
+
+            connection = (URL(modelUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 30000
+                readTimeout = 30000
+                instanceFollowRedirects = true
+                requestMethod = "GET"
+                connect()
+            }
+
+            if (connection.responseCode !in 200..299) {
+                throw Exception("Servidor retornou HTTP ${connection.responseCode}")
+            }
+
+            val total = connection.contentLengthLong
+            var downloaded = 0L
+
+            connection.inputStream.use { input ->
+                tempFile.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(1024 * 1024)
+
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count == -1) break
+
+                        output.write(buffer, 0, count)
+                        downloaded += count
+
+                        if (total > 0) {
+                            onProgress(((downloaded * 100) / total).toInt().coerceIn(0, 100))
+                        }
+                    }
+                }
+            }
+
+            if (tempFile.length() == 0L) {
+                throw Exception("O arquivo baixado está vazio.")
+            }
+
+            if (!tempFile.renameTo(modelFile)) {
+                tempFile.copyTo(modelFile, overwrite = true)
+                tempFile.delete()
+            }
+
+            onProgress(100)
+            Result.success("Download concluído. Arquivo salvo no aplicativo.")
+        } catch (e: Exception) {
+            Result.failure(Exception("Falha no download: ${e.message}", e))
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
     fun refreshState() {
-        if (!modelFile.exists()) {
+        if (!modelFile.exists() || modelFile.length() == 0L) {
             state = ModelRuntimeState.NOT_DOWNLOADED
             return
         }
 
-        try {
-            state = if (nativeLoadModel(modelFile.absolutePath)) {
+        state = try {
+            if (nativeLoadModel(modelFile.absolutePath)) {
                 ModelRuntimeState.READY
             } else {
                 ModelRuntimeState.ERROR
             }
-        } catch (_: UnsatisfiedLinkError) {
-            state = ModelRuntimeState.ERROR
+        } catch (_: Throwable) {
+            ModelRuntimeState.ERROR
         }
     }
 
     fun statusText(): String {
-        refreshState()
         return when (state) {
-            ModelRuntimeState.READY -> "Modelo local pronto: Qwen3-4B GGUF Q4_K_M detectado e bridge nativa ativa."
-            ModelRuntimeState.LOADING -> "Carregando modelo local Qwen3-4B..."
-            ModelRuntimeState.ERROR -> "Erro ao preparar o modelo local. Verifique o arquivo GGUF, a memória do aparelho e a compatibilidade da ABI."
-            ModelRuntimeState.NOT_DOWNLOADED -> "Modelo local ausente. Baixe o arquivo GGUF Qwen3-4B Q4_K_M do repositório oficial para rodar offline."
+            ModelRuntimeState.READY -> "Modelo local pronto."
+            ModelRuntimeState.LOADING -> "Carregando modelo local..."
+            ModelRuntimeState.ERROR -> "Erro ao carregar o modelo. Verifique o arquivo e a memória."
+            ModelRuntimeState.NOT_DOWNLOADED -> {
+                if (modelFile.exists()) "Modelo baixado. Toque em Atualizar status para carregar."
+                else "Modelo local ainda não baixado."
+            }
         }
     }
 
-    fun downloadInstructionText(): String {
-        return "Para baixar o modelo, use a página oficial do Qwen3-4B GGUF: $officialModelUrl. " +
-            "Selecione a quantização Q4_K_M e salve o arquivo em app-specific storage antes de carregar o runtime."
-    }
-
-    fun downloadModel(): Result<String> {
-        if (!modelFile.exists()) {
-            return Result.success(
-                "Download do modelo ainda não foi executado automaticamente. " +
-                    "Use o botão de download para iniciar a etapa oficial do modelo GGUF Qwen3-4B Q4_K_M. " +
-                    "Repositório oficial: $officialModelUrl"
-            )
-        }
-
-        return Result.success("Modelo localizado em ${modelFile.absolutePath}")
-    }
+    fun downloadInstructionText(): String =
+        "Baixe o Qwen3-4B GGUF Q4_K_M usando o botão Baixar modelo."
 
     fun generate(prompt: String): Result<String> {
-        val text = prompt.trim()
-        if (text.isEmpty()) {
-            return Result.failure(IllegalArgumentException("Digite uma mensagem antes de enviar."))
+        if (prompt.isBlank()) {
+            return Result.failure(IllegalArgumentException("Digite uma mensagem."))
         }
 
         refreshState()
 
-        if (state == ModelRuntimeState.NOT_DOWNLOADED) {
+        if (state != ModelRuntimeState.READY) {
             return Result.failure(
-                IllegalStateException(
-                    "Modelo local ausente. Baixe o pacote Qwen3-4B-GGUF Q4_K_M antes de gerar respostas."
-                )
-            )
-        }
-
-        if (state == ModelRuntimeState.ERROR) {
-            return Result.failure(
-                IllegalStateException(
-                    "O runtime nativo falhou ao carregar o modelo. Verifique o arquivo do modelo e a memória disponível."
-                )
+                IllegalStateException("O modelo não está pronto. Baixe e carregue o modelo primeiro.")
             )
         }
 
         return try {
-            Result.success(nativeGenerate(text))
-        } catch (t: Throwable) {
-            Result.failure(t)
+            Result.success(nativeGenerate(prompt.trim()))
+        } catch (e: Throwable) {
+            Result.failure(e)
         }
     }
 
     fun releaseModel() {
         try {
             nativeReleaseModel()
-        } catch (_: UnsatisfiedLinkError) {
-            // bridge not yet linked; safe no-op during native runtime bootstrap
+        } catch (_: Throwable) {
         }
-
         state = ModelRuntimeState.NOT_DOWNLOADED
     }
 
@@ -117,7 +163,6 @@ class LocalModelEngine(private val context: Context) {
             try {
                 System.loadLibrary("rud_llama_jni")
             } catch (_: UnsatisfiedLinkError) {
-                // Library is expected to become available as soon as the native target is built.
             }
         }
     }
