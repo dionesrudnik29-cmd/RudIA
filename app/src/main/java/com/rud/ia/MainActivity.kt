@@ -14,7 +14,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,9 +81,15 @@ fun ChatScreen() {
                 shape = MaterialTheme.shapes.medium
             ) {
                 Column(Modifier.padding(12.dp)) {
-                    Text(modelStatus, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        modelStatus,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Spacer(Modifier.height(8.dp))
-                    Text(modelInstruction, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        modelInstruction,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
 
@@ -93,9 +101,8 @@ fun ChatScreen() {
             ) {
                 Button(
                     modifier = Modifier.weight(1f),
+                    enabled = !isDownloading && !isProcessing,
                     onClick = {
-                        if (isDownloading) return@Button
-
                         showDownloadDialog = true
                         isDownloading = true
                         downloadProgress = 0
@@ -103,8 +110,11 @@ fun ChatScreen() {
 
                         scope.launch {
                             val result = modelEngine.downloadModel { progress ->
-                                downloadProgress = progress
-                                downloadMessage = "Baixando modelo... $progress%"
+                                scope.launch(Dispatchers.Main) {
+                                    downloadProgress = progress
+                                    downloadMessage =
+                                        "Baixando modelo... $progress%"
+                                }
                             }
 
                             isDownloading = false
@@ -113,6 +123,8 @@ fun ChatScreen() {
                                 downloadProgress = 100
                                 downloadMessage = result.getOrThrow()
                                 modelStatus = modelEngine.statusText()
+                                modelInstruction =
+                                    modelEngine.downloadInstructionText()
                             } else {
                                 downloadMessage =
                                     result.exceptionOrNull()?.message
@@ -126,10 +138,30 @@ fun ChatScreen() {
 
                 OutlinedButton(
                     modifier = Modifier.weight(1f),
+                    enabled = !isProcessing && !isDownloading,
                     onClick = {
-                        modelEngine.refreshState()
-                        modelStatus = modelEngine.statusText()
-                        modelInstruction = modelEngine.downloadInstructionText()
+                        isProcessing = true
+
+                        scope.launch {
+                            try {
+                                val result = withContext(Dispatchers.IO) {
+                                    modelEngine.refreshState()
+                                    Pair(
+                                        modelEngine.statusText(),
+                                        modelEngine.downloadInstructionText()
+                                    )
+                                }
+
+                                modelStatus = result.first
+                                modelInstruction = result.second
+                            } catch (e: Exception) {
+                                modelStatus = "Erro ao verificar o modelo: ${
+                                    e.message ?: "erro desconhecido"
+                                }"
+                            } finally {
+                                isProcessing = false
+                            }
+                        }
                     }
                 ) {
                     Text("Atualizar status")
@@ -140,7 +172,9 @@ fun ChatScreen() {
 
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(messages) { msg ->
@@ -173,7 +207,9 @@ fun ChatScreen() {
             }
 
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
@@ -181,14 +217,15 @@ fun ChatScreen() {
                     onValueChange = { textState = it },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Converse com o Rud IA...") },
-                    enabled = !isProcessing,
+                    enabled = !isProcessing && !isDownloading,
                     maxLines = 4
                 )
 
                 Spacer(Modifier.width(8.dp))
 
                 Button(
-                    enabled = textState.isNotBlank() && !isProcessing,
+                    enabled = textState.isNotBlank() &&
+                        !isProcessing && !isDownloading,
                     onClick = {
                         val question = textState.trim()
                         if (question.isEmpty()) return@Button
@@ -198,26 +235,35 @@ fun ChatScreen() {
                         isProcessing = true
 
                         scope.launch {
-                            val response = kotlinx.coroutines.withContext(
-                                kotlinx.coroutines.Dispatchers.IO
-                            ) {
-                                modelEngine.generate(question)
-                            }
+                            try {
+                                val response = withContext(Dispatchers.IO) {
+                                    modelEngine.generate(question)
+                                }
 
-                            if (response.isSuccess) {
-                                messages.add(Message(response.getOrThrow(), false))
-                            } else {
+                                if (response.isSuccess) {
+                                    messages.add(
+                                        Message(response.getOrThrow(), false)
+                                    )
+                                } else {
+                                    messages.add(
+                                        Message(
+                                            response.exceptionOrNull()?.message
+                                                ?: "Não foi possível processar a mensagem.",
+                                            false
+                                        )
+                                    )
+                                }
+                            } catch (e: Exception) {
                                 messages.add(
                                     Message(
-                                        response.exceptionOrNull()?.message
-                                            ?: "Não foi possível processar a mensagem.",
+                                        "Erro: ${e.message ?: "falha inesperada"}",
                                         false
                                     )
                                 )
+                            } finally {
+                                isProcessing = false
+                                modelStatus = modelEngine.statusText()
                             }
-
-                            isProcessing = false
-                            modelStatus = modelEngine.statusText()
                         }
                     }
                 ) {
@@ -233,10 +279,15 @@ fun ChatScreen() {
                 if (!isDownloading) showDownloadDialog = false
             },
             title = {
-                Text(if (isDownloading) "Baixando modelo" else "Download do modelo")
+                Text(
+                    if (isDownloading) "Baixando modelo"
+                    else "Download do modelo"
+                )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Text(downloadMessage)
 
                     LinearProgressIndicator(
