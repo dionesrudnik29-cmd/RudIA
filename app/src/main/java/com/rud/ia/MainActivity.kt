@@ -1,8 +1,11 @@
+
 package com.rud.ia
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -48,7 +51,9 @@ fun ChatScreen() {
     var textState by remember { mutableStateOf("") }
     var isProcessing by remember { mutableStateOf(false) }
     var modelStatus by remember { mutableStateOf(modelEngine.statusText()) }
-    var modelInstruction by remember { mutableStateOf(modelEngine.downloadInstructionText()) }
+    var modelInstruction by remember {
+        mutableStateOf(modelEngine.downloadInstructionText())
+    }
 
     val messages = remember {
         mutableStateListOf(
@@ -108,14 +113,24 @@ fun ChatScreen() {
             ) {
                 Button(
                     onClick = {
-                        val browserIntent = Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse(modelEngine.officialModelUrl)
-                        )
-
-                        val resolved = browserIntent.resolveActivity(context.packageManager)
-                        if (resolved != null) {
+                        try {
+                            val browserIntent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(modelEngine.officialModelUrl)
+                            )
                             context.startActivity(browserIntent)
+                        } catch (_: ActivityNotFoundException) {
+                            Toast.makeText(
+                                context,
+                                "Nenhum navegador encontrado para abrir o link.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(
+                                context,
+                                "Erro ao abrir o link: ${e.message ?: "erro desconhecido"}",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
 
                         modelStatus = modelEngine.statusText()
@@ -212,12 +227,14 @@ fun ChatScreen() {
                         val response = modelEngine.generate(question)
 
                         if (response.isSuccess) {
-                            messages.add(Message(response.getOrThrow(), false))
+                            messages.add(
+                                Message(response.getOrThrow(), false)
+                            )
                         } else {
                             messages.add(
                                 Message(
                                     response.exceptionOrNull()?.message
-                                        ?: "Não foi possível processar a mensagem no momento.",
+                                        ?: "Não foi possível processar a mensagem.",
                                     false
                                 )
                             )
@@ -237,3 +254,4 @@ fun ChatScreen() {
         }
     }
 }
+                     
