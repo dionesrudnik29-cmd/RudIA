@@ -16,20 +16,26 @@ enum class ModelRuntimeState {
 }
 
 class LocalModelEngine(private val context: Context) {
+
     private val modelDir = File(context.filesDir, "models")
-    private val modelFile = File(modelDir, "Qwen3-4B-Q4_K_M.gguf")
+    private val modelFile = File(
+        modelDir,
+        "Qwen3-4B-Q4_K_M.gguf"
+    )
 
     private val modelUrl =
         "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true"
 
     val officialModelUrl = modelUrl
 
+    @Volatile
     var state: ModelRuntimeState = ModelRuntimeState.NOT_DOWNLOADED
         private set
 
     init {
         modelDir.mkdirs()
-        if (modelFile.exists() && modelFile.length() > 0) {
+
+        if (modelFile.exists() && modelFile.length() > 0L) {
             state = ModelRuntimeState.NOT_DOWNLOADED
         }
     }
@@ -45,18 +51,25 @@ class LocalModelEngine(private val context: Context) {
 
         try {
             modelDir.mkdirs()
-            val tempFile = File(modelDir, modelFile.name + ".part")
 
-            connection = (URL(modelUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 30000
-                readTimeout = 30000
-                instanceFollowRedirects = true
-                requestMethod = "GET"
-                connect()
-            }
+            val tempFile = File(
+                modelDir,
+                modelFile.name + ".part"
+            )
+
+            connection =
+                (URL(modelUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 30000
+                    readTimeout = 60000
+                    instanceFollowRedirects = true
+                    requestMethod = "GET"
+                    connect()
+                }
 
             if (connection.responseCode !in 200..299) {
-                throw Exception("Servidor retornou HTTP ${connection.responseCode}")
+                throw Exception(
+                    "Servidor retornou HTTP ${connection.responseCode}"
+                )
             }
 
             val total = connection.contentLengthLong
@@ -64,7 +77,7 @@ class LocalModelEngine(private val context: Context) {
 
             connection.inputStream.use { input ->
                 tempFile.outputStream().buffered().use { output ->
-                    val buffer = ByteArray(1024 * 1024)
+                    val buffer = ByteArray(256 * 1024)
 
                     while (true) {
                         val count = input.read(buffer)
@@ -73,8 +86,13 @@ class LocalModelEngine(private val context: Context) {
                         output.write(buffer, 0, count)
                         downloaded += count
 
-                        if (total > 0) {
-                            onProgress(((downloaded * 100) / total).toInt().coerceIn(0, 100))
+                        if (total > 0L) {
+                            val percent =
+                                ((downloaded * 100) / total)
+                                    .toInt()
+                                    .coerceIn(0, 100)
+
+                            onProgress(percent)
                         }
                     }
                 }
@@ -90,19 +108,31 @@ class LocalModelEngine(private val context: Context) {
             }
 
             onProgress(100)
-            Result.success("Download concluído. Arquivo salvo no aplicativo.")
+
+            Result.success(
+                "Download concluído. Arquivo salvo no aplicativo."
+            )
         } catch (e: Exception) {
-            Result.failure(Exception("Falha no download: ${e.message}", e))
+            Result.failure(
+                Exception("Falha no download: ${e.message}", e)
+            )
         } finally {
             connection?.disconnect()
         }
     }
 
+    @Synchronized
     fun refreshState() {
+        if (state == ModelRuntimeState.READY) {
+            return
+        }
+
         if (!modelFile.exists() || modelFile.length() == 0L) {
             state = ModelRuntimeState.NOT_DOWNLOADED
             return
         }
+
+        state = ModelRuntimeState.LOADING
 
         state = try {
             if (nativeLoadModel(modelFile.absolutePath)) {
@@ -117,44 +147,78 @@ class LocalModelEngine(private val context: Context) {
 
     fun statusText(): String {
         return when (state) {
-            ModelRuntimeState.READY -> "Modelo local pronto."
-            ModelRuntimeState.LOADING -> "Carregando modelo local..."
-            ModelRuntimeState.ERROR -> "Erro ao carregar o modelo. Verifique o arquivo e a memória."
+            ModelRuntimeState.READY ->
+                "Modelo local pronto."
+
+            ModelRuntimeState.LOADING ->
+                "Carregando modelo local..."
+
+            ModelRuntimeState.ERROR ->
+                "Erro ao carregar o modelo. Verifique o arquivo e a memória."
+
             ModelRuntimeState.NOT_DOWNLOADED -> {
-                if (modelFile.exists()) "Modelo baixado. Toque em Atualizar status para carregar."
-                else "Modelo local ainda não baixado."
+                if (modelFile.exists() && modelFile.length() > 0L) {
+                    "Modelo baixado. Toque em Atualizar status para carregar."
+                } else {
+                    "Modelo local ainda não baixado."
+                }
             }
         }
     }
 
-    fun downloadInstructionText(): String =
-        "Baixe o Qwen3-4B GGUF Q4_K_M usando o botão Baixar modelo."
+    fun downloadInstructionText(): String {
+        return "Baixe o Qwen3-4B GGUF Q4_K_M usando o botão Baixar modelo."
+    }
 
+    @Synchronized
     fun generate(prompt: String): Result<String> {
         if (prompt.isBlank()) {
-            return Result.failure(IllegalArgumentException("Digite uma mensagem."))
+            return Result.failure(
+                IllegalArgumentException("Digite uma mensagem.")
+            )
         }
 
-        refreshState()
+        // Só tenta carregar o modelo se ele ainda não estiver pronto.
+        if (state != ModelRuntimeState.READY) {
+            refreshState()
+        }
 
         if (state != ModelRuntimeState.READY) {
             return Result.failure(
-                IllegalStateException("O modelo não está pronto. Baixe e carregue o modelo primeiro.")
+                IllegalStateException(
+                    "O modelo não está pronto. Baixe e carregue o modelo primeiro."
+                )
             )
         }
 
         return try {
-            Result.success(nativeGenerate(prompt.trim()))
+            val response = nativeGenerate(prompt.trim())
+
+            if (response.isBlank()) {
+                Result.failure(
+                    Exception("O modelo retornou uma resposta vazia.")
+                )
+            } else {
+                Result.success(response)
+            }
         } catch (e: Throwable) {
-            Result.failure(e)
+            Result.failure(
+                Exception(
+                    "Falha ao gerar resposta: ${e.message ?: "erro nativo"}",
+                    e
+                )
+            )
         }
     }
 
+    @Synchronized
     fun releaseModel() {
         try {
             nativeReleaseModel()
         } catch (_: Throwable) {
+            // Evita que uma falha ao liberar o modelo feche a interface.
         }
+
         state = ModelRuntimeState.NOT_DOWNLOADED
     }
 
@@ -163,6 +227,7 @@ class LocalModelEngine(private val context: Context) {
             try {
                 System.loadLibrary("rud_llama_jni")
             } catch (_: UnsatisfiedLinkError) {
+                // O erro será apresentado quando o modelo for utilizado.
             }
         }
     }
