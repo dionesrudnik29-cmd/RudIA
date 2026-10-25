@@ -1,3 +1,4 @@
+#include <fstream>
 #include <jni.h>
 #include <android/log.h>
 #include <cstdlib>
