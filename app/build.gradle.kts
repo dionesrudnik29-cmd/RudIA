@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.rudia.chatbot"
+        applicationId = "com.rudia.chatbot.novo"
         minSdk = 24
         targetSdk = 34
         versionCode = 2
