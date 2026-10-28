@@ -1,9 +1,8 @@
-
 name: Build Android APK
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "correcoes-rud-ia"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:
@@ -11,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -27,14 +27,35 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build APK with Gradle
-        run: gradle assembleDebug
+      - name: Preparar chave de assinatura fixa
+        env:
+          RUD_KEYSTORE_BASE64: ${{ secrets.RUD_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$RUD_KEYSTORE_BASE64" ]; then
+            echo "$RUD_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/rud.jks"
+            echo "RUD_KEYSTORE_FILE=$RUNNER_TEMP/rud.jks" >> "$GITHUB_ENV"
+            echo "Chave fixa encontrada."
+          else
+            echo "::warning::Segredo RUD_KEYSTORE_BASE64 ausente. O APK sera assinado com uma chave temporaria e NAO instalara por cima de versoes anteriores."
+          fi
+
+      - name: Testes e build do APK
+        env:
+          RUD_KEYSTORE_PASSWORD: ${{ secrets.RUD_KEYSTORE_PASSWORD }}
+          RUD_KEY_ALIAS: ${{ secrets.RUD_KEY_ALIAS }}
+          RUD_KEY_PASSWORD: ${{ secrets.RUD_KEY_PASSWORD }}
+        run: gradle testReleaseUnitTest assembleRelease --stacktrace
+
+      - name: Mostrar assinatura do APK
+        run: |
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/*.apk | grep -i "SHA-256" || true
+          ls -la app/build/outputs/apk/release/
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RudIA-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: RudIA-apk
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-          retention-days: 14
-          
+          retention-days: 30
