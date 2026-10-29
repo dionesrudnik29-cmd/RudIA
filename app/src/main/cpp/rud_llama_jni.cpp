@@ -89,8 +89,6 @@ Java_com_rud_ia_LocalModelEngine_nativeLoadModel(
     freeAll();
 
     llama_model_params mp = llama_model_default_params();
-    mp.use_mmap = true;   // não copia os 2,5 GB para a RAM de uma vez
-    mp.use_mlock = false;
     mp.n_gpu_layers = 0;
 
     g_model = llama_model_load_from_file(path.c_str(), mp);
