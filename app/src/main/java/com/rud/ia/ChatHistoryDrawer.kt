@@ -197,19 +197,17 @@ private fun ModelStatusFooter(
     }
 }
 
-private val ptBr = PortugueseLocale
-
 private fun dayLabel(timestamp: Long, now: Long): String {
     val daysAgo = ((startOfDay(now) - startOfDay(timestamp)) / DAY_MILLIS).roundToInt()
     return when (daysAgo) {
         0 -> "Hoje"
         1 -> "Ontem"
-        else -> SimpleDateFormat("dd/MM/yyyy", ptBr).format(Date(timestamp))
+        else -> SimpleDateFormat("dd/MM/yyyy", PortugueseLocale).format(Date(timestamp))
     }
 }
 
 private fun timeLabel(timestamp: Long): String =
-    SimpleDateFormat("HH:mm", ptBr).format(Date(timestamp))
+    SimpleDateFormat("HH:mm", PortugueseLocale).format(Date(timestamp))
 
 private fun startOfDay(timestamp: Long): Long =
     Calendar.getInstance().apply {
