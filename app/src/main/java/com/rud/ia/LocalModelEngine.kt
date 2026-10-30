@@ -20,11 +20,11 @@ class LocalModelEngine(private val context: Context) {
     private val modelDir = File(context.filesDir, "models")
     private val modelFile = File(
         modelDir,
-        "Qwen3-4B-Q4_K_M.gguf"
+        "Qwen3-0.6B-Q4_K_M.gguf"
     )
 
     private val modelUrl =
-        "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true"
+        "https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf?download=true"
 
     val officialModelUrl = modelUrl
 
@@ -34,6 +34,8 @@ class LocalModelEngine(private val context: Context) {
 
     init {
         modelDir.mkdirs()
+
+        File(modelDir, "Qwen3-4B-Q4_K_M.gguf").delete()
 
         if (modelFile.exists() && modelFile.length() > 0L) {
             state = ModelRuntimeState.NOT_DOWNLOADED
@@ -167,7 +169,7 @@ class LocalModelEngine(private val context: Context) {
     }
 
     fun downloadInstructionText(): String {
-        return "Baixe o Qwen3-4B GGUF Q4_K_M usando o botão Baixar modelo."
+        return "Baixe o Qwen3-0.6B GGUF Q4_K_M usando o botão Baixar modelo."
     }
 
     @Synchronized
