@@ -1,5 +1,14 @@
 package com.rud.ia
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,10 +27,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -41,6 +56,22 @@ fun WelcomeContent(
     ready: Boolean,
     onSuggestionClick: (String) -> Unit
 ) {
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        entered = true
+    }
+
+    val floating = rememberInfiniteTransition(label = "logoFloat")
+    val floatY by floating.animateFloat(
+        initialValue = 0f,
+        targetValue = -8f,
+        animationSpec = infiniteRepeatable(
+            tween(2400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        ),
+        label = "logoFloatY"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -48,7 +79,11 @@ fun WelcomeContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        SparkleLogo(modifier = Modifier.size(96.dp))
+        SparkleLogo(
+            modifier = Modifier
+                .size(96.dp)
+                .graphicsLayer { translationY = floatY.dp.toPx() }
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -71,13 +106,20 @@ fun WelcomeContent(
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        suggestions.forEach { suggestion ->
-            SuggestionChip(
-                suggestion = suggestion,
-                enabled = ready,
-                onClick = { onSuggestionClick(suggestion.text) }
-            )
-            Spacer(modifier = Modifier.height(10.dp))
+        suggestions.forEachIndexed { index, suggestion ->
+            val delay = 200 + index * 110
+            AnimatedVisibility(
+                visible = entered,
+                enter = fadeIn(tween(450, delayMillis = delay)) +
+                    slideInVertically(tween(450, delayMillis = delay)) { it / 3 }
+            ) {
+                SuggestionChip(
+                    suggestion = suggestion,
+                    enabled = ready,
+                    onClick = { onSuggestionClick(suggestion.text) },
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+            }
         }
     }
 }
@@ -86,11 +128,12 @@ fun WelcomeContent(
 private fun SuggestionChip(
     suggestion: Suggestion,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(18.dp)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
