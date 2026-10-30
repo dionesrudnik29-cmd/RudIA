@@ -237,13 +237,33 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(currentId = id) }
     }
 
-    fun deleteConversation(id: String) {
+    private var lastDeleted: Pair<Conversation, Int>? = null
+
+    /**
+     * Apaga a conversa na hora. Antes, a exclusão era ignorada em silêncio
+     * quando a conversa estava gerando resposta; agora a geração é parada e
+     * a conversa é apagada mesmo assim. Retorna true se algo foi apagado.
+     */
+    fun deleteConversation(id: String): Boolean {
         val s = _state.value
-        if (s.generating && s.currentId == id) return
-        var remaining = s.conversations.filterNot { it.id == id }
-        if (remaining.isEmpty()) remaining = listOf(createConversation())
-        val current = if (s.currentId == id) remaining.first().id else s.currentId
-        _state.update { it.copy(conversations = remaining, currentId = current) }
+        if (s.generating && s.currentId == id) stopGeneration()
+        val result = ConversationOps.delete(s.conversations, s.currentId, id) { createConversation() }
+            ?: return false
+        lastDeleted = result.removed to result.removedIndex
+        _state.update { it.copy(conversations = result.conversations, currentId = result.currentId) }
+        persist()
+        return true
+    }
+
+    /** Desfaz a última exclusão (botão "Desfazer" do aviso). */
+    fun undoDelete() {
+        val (conv, index) = lastDeleted ?: return
+        lastDeleted = null
+        _state.update { s ->
+            val list = ConversationOps.restore(s.conversations, conv, index)
+            val keepCurrent = s.generating && list.any { it.id == s.currentId }
+            s.copy(conversations = list, currentId = if (keepCurrent) s.currentId else conv.id)
+        }
         persist()
     }
 
