@@ -84,7 +84,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     const llama_vocab* vocab = llama_model_get_vocab(g_model);
     std::string formatted =
         "<|im_start|>user\n" + input +
-        "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        "<|im_end|>\n<|im_start|>assistant\n";
 
     int needed = -llama_tokenize(
         vocab, formatted.c_str(), formatted.size(),
@@ -113,7 +113,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
     std::string output;
-    const int max_tokens = 200;
+    const int max_tokens = 256;
 
     for (int i = 0; i < max_tokens; ++i) {
         llama_token token = llama_sampler_sample(
