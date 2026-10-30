@@ -1,5 +1,4 @@
 
-    
 #include <jni.h>
 #include <android/log.h>
 #include <llama.h>
@@ -50,8 +49,8 @@ Java_com_rud_ia_LocalModelEngine_nativeLoadModel(
     }
 
     llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = 2048;
-    cp.n_batch = 512;
+    cp.n_ctx = 1024;
+    cp.n_batch = 256;
     cp.n_threads = 4;
 
     g_context = llama_init_from_model(g_model, cp);
@@ -85,7 +84,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     const llama_vocab* vocab = llama_model_get_vocab(g_model);
     std::string formatted =
         "<|im_start|>user\n" + input +
-        "<|im_end|>\n<|im_start|>assistant\n";
+        "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n";
 
     int needed = -llama_tokenize(
         vocab, formatted.c_str(), formatted.size(),
@@ -114,7 +113,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
     std::string output;
-    const int max_tokens = 256;
+    const int max_tokens = 200;
 
     for (int i = 0; i < max_tokens; ++i) {
         llama_token token = llama_sampler_sample(
