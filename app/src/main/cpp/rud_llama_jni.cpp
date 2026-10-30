@@ -49,7 +49,7 @@ Java_com_rud_ia_LocalModelEngine_nativeLoadModel(
     }
 
     llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = 1024;
+    cp.n_ctx = 2048;
     cp.n_batch = 256;
     cp.n_threads = 4;
 
@@ -113,7 +113,8 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
     std::string output;
-    const int max_tokens = 256;
+    const int max_tokens = 1024;
+    int generated = 0;
 
     for (int i = 0; i < max_tokens; ++i) {
         llama_token token = llama_sampler_sample(
@@ -126,10 +127,14 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
             vocab, token, piece, sizeof(piece), 0, true);
 
         if (len > 0) output.append(piece, len);
+        generated++;
 
         batch = llama_batch_get_one(&token, 1);
         if (llama_decode(g_context, batch) != 0) break;
     }
+
+    __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
+                        "Resposta gerada com %d tokens", generated);
 
     llama_sampler_free(sampler);
     return env->NewStringUTF(output.c_str());
