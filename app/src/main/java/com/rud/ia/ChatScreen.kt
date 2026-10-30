@@ -1,5 +1,9 @@
 package com.rud.ia
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,21 +17,18 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 data class ChatMessage(
     val text: String,
@@ -39,18 +40,23 @@ fun ChatScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val engine = remember(context) { LocalModelEngine(context.applicationContext) }
+    val store = remember(context) { ChatHistoryStore(context.applicationContext) }
 
     val messages = remember { mutableStateListOf<ChatMessage>() }
+    val conversations = remember { mutableStateListOf<Conversation>() }
+    var currentId by remember { mutableStateOf(UUID.randomUUID().toString()) }
     var input by remember { mutableStateOf("") }
     var modelState by remember { mutableStateOf(engine.state) }
     var status by remember { mutableStateOf("") }
     var downloadError by remember { mutableStateOf<String?>(null) }
+    var downloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
+    var historyError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var downloading by remember { mutableStateOf(false) }
-    var progress by remember { mutableIntStateOf(0) }
-    var showInfo by remember { mutableStateOf(false) }
+    var entered by remember { mutableStateOf(false) }
 
+    val downloading = downloadProgress != null
     val ready = modelState == ModelRuntimeState.READY && !downloading
 
     fun refreshStatus() {
@@ -80,22 +86,60 @@ fun ChatScreen() {
     fun downloadModel() {
         if (busy || downloading) return
 
-        downloading = true
         downloadError = null
-        progress = 0
+        downloadProgress = DownloadProgress(0L, 0L, 0L)
 
         scope.launch {
-            val result = engine.downloadModel { value ->
+            val result = engine.downloadModel { progress ->
                 scope.launch(Dispatchers.Main) {
-                    progress = value
+                    downloadProgress = progress
                 }
             }
-            downloading = false
+            downloadProgress = null
             result.onSuccess { refreshStatus() }
             result.onFailure { error ->
                 downloadError = error.message ?: "Erro desconhecido"
             }
         }
+    }
+
+    fun persistConversation() {
+        val snapshot = messages.toList()
+        val firstPrompt = snapshot.firstOrNull { it.isUser } ?: return
+        val updated = Conversation(
+            id = currentId,
+            title = firstPrompt.text.take(60),
+            updatedAt = System.currentTimeMillis(),
+            messages = snapshot
+        )
+        val index = conversations.indexOfFirst { it.id == currentId }
+        if (index >= 0) {
+            conversations[index] = updated
+        } else {
+            conversations.add(updated)
+        }
+
+        val allConversations = conversations.toList()
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching { store.save(allConversations) }.isSuccess
+            }
+            historyError = if (saved) null else "Não foi possível salvar o histórico neste celular."
+        }
+    }
+
+    fun startNewChat() {
+        if (busy) return
+        currentId = UUID.randomUUID().toString()
+        messages.clear()
+        input = ""
+    }
+
+    fun openConversation(conversation: Conversation) {
+        if (busy) return
+        currentId = conversation.id
+        messages.clear()
+        messages.addAll(conversation.messages)
     }
 
     fun sendMessage(text: String) {
@@ -122,11 +166,14 @@ fun ChatScreen() {
                 )
             } finally {
                 busy = false
+                persistConversation()
             }
         }
     }
 
     LaunchedEffect(Unit) {
+        entered = true
+        conversations.addAll(withContext(Dispatchers.IO) { store.load() })
         refreshStatus()
     }
 
@@ -137,7 +184,7 @@ fun ChatScreen() {
     }
 
     val headerText = when {
-        downloading -> "Baixando a IA... $progress%"
+        downloading -> "Baixando a IA..."
         modelState == ModelRuntimeState.READY -> "Pronta para conversar"
         modelState == ModelRuntimeState.LOADING -> "Carregando a IA..."
         modelState == ModelRuntimeState.ERROR -> "Erro ao carregar a IA"
@@ -149,69 +196,97 @@ fun ChatScreen() {
         else -> StatusWaiting
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Background)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        ChatHeader(
-            statusText = headerText,
-            statusColor = headerColor,
-            newChatEnabled = !busy && messages.isNotEmpty(),
-            onMenuClick = { showInfo = true },
-            onNewChatClick = { messages.clear() }
-        )
-
-        ModelBanner(
-            modelState = modelState,
-            downloading = downloading,
-            progress = progress,
-            downloadError = downloadError,
-            onDownloadClick = { downloadModel() },
-            onRetryClick = { refreshStatus() }
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            if (messages.isEmpty()) {
-                WelcomeContent(
-                    ready = ready,
-                    onSuggestionClick = { sendMessage(it) }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = CardSurface,
+                drawerContentColor = TextWhite
+            ) {
+                ChatHistoryDrawer(
+                    conversations = conversations.toList(),
+                    activeId = currentId,
+                    status = status,
+                    historyError = historyError,
+                    canRefresh = !busy && !downloading,
+                    onNewChat = {
+                        startNewChat()
+                        scope.launch { drawerState.close() }
+                    },
+                    onOpen = { conversation ->
+                        openConversation(conversation)
+                        scope.launch { drawerState.close() }
+                    },
+                    onRefresh = { refreshStatus() }
                 )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    state = listState,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(messages) { message ->
-                        MessageBubble(message)
+            }
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BackgroundBrush)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AnimatedVisibility(
+                visible = entered,
+                enter = fadeIn(tween(500)) + slideInVertically(tween(500)) { -it }
+            ) {
+                ChatHeader(
+                    statusText = headerText,
+                    statusColor = headerColor,
+                    newChatEnabled = !busy && messages.isNotEmpty(),
+                    onMenuClick = { scope.launch { drawerState.open() } },
+                    onNewChatClick = { startNewChat() }
+                )
+            }
+
+            ModelBanner(
+                modelState = modelState,
+                downloadProgress = downloadProgress,
+                downloadError = downloadError,
+                onDownloadClick = { downloadModel() },
+                onRetryClick = { refreshStatus() }
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                if (messages.isEmpty()) {
+                    WelcomeContent(
+                        ready = ready,
+                        onSuggestionClick = { sendMessage(it) }
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        state = listState,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(messages) { message ->
+                            MessageBubble(message)
+                        }
                     }
                 }
             }
+
+            AnimatedVisibility(
+                visible = entered,
+                enter = fadeIn(tween(600, delayMillis = 200)) +
+                    slideInVertically(tween(600, delayMillis = 200)) { it }
+            ) {
+                ChatInputBar(
+                    value = input,
+                    onValueChange = { input = it },
+                    ready = ready,
+                    busy = busy,
+                    onSend = { sendMessage(input) }
+                )
+            }
         }
-
-        ChatInputBar(
-            value = input,
-            onValueChange = { input = it },
-            ready = ready,
-            busy = busy,
-            onSend = { sendMessage(input) }
-        )
-    }
-
-    if (showInfo) {
-        ModelInfoSheet(
-            status = status,
-            canRefresh = !busy && !downloading,
-            onRefresh = { refreshStatus() },
-            onDismiss = { showInfo = false }
-        )
     }
 }
