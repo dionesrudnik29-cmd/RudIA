@@ -1,4 +1,3 @@
-
 package com.rud.ia
 
 import android.content.Context
@@ -14,6 +13,12 @@ enum class ModelRuntimeState {
     READY,
     ERROR
 }
+
+data class DownloadProgress(
+    val downloadedBytes: Long,
+    val totalBytes: Long,
+    val bytesPerSecond: Long
+)
 
 class LocalModelEngine(private val context: Context) {
 
@@ -47,7 +52,7 @@ class LocalModelEngine(private val context: Context) {
     private external fun nativeReleaseModel()
 
     suspend fun downloadModel(
-        onProgress: (Int) -> Unit
+        onProgress: (DownloadProgress) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
 
@@ -76,6 +81,8 @@ class LocalModelEngine(private val context: Context) {
 
             val total = connection.contentLengthLong
             var downloaded = 0L
+            var windowStart = System.currentTimeMillis()
+            var windowBytes = 0L
 
             connection.inputStream.use { input ->
                 tempFile.outputStream().buffered().use { output ->
@@ -88,13 +95,13 @@ class LocalModelEngine(private val context: Context) {
                         output.write(buffer, 0, count)
                         downloaded += count
 
-                        if (total > 0L) {
-                            val percent =
-                                ((downloaded * 100) / total)
-                                    .toInt()
-                                    .coerceIn(0, 100)
-
-                            onProgress(percent)
+                        val now = System.currentTimeMillis()
+                        val elapsed = now - windowStart
+                        if (elapsed >= 500L) {
+                            val speed = (downloaded - windowBytes) * 1000L / elapsed
+                            onProgress(DownloadProgress(downloaded, total, speed))
+                            windowStart = now
+                            windowBytes = downloaded
                         }
                     }
                 }
@@ -108,8 +115,6 @@ class LocalModelEngine(private val context: Context) {
                 tempFile.copyTo(modelFile, overwrite = true)
                 tempFile.delete()
             }
-
-            onProgress(100)
 
             Result.success(
                 "Download concluído. Arquivo salvo no aplicativo."
@@ -166,10 +171,6 @@ class LocalModelEngine(private val context: Context) {
                 }
             }
         }
-    }
-
-    fun downloadInstructionText(): String {
-        return "Baixe o Qwen3-0.6B GGUF Q4_K_M usando o botão Baixar modelo."
     }
 
     @Synchronized
