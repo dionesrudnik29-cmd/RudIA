@@ -154,7 +154,11 @@ fun ChatScreen() {
         scope.launch {
             try {
                 val answer = withContext(Dispatchers.IO) {
-                    engine.generate(prompt).getOrElse { error ->
+                    engine.generate(prompt) { partial ->
+                        scope.launch(Dispatchers.Main) {
+                            messages[messages.lastIndex] = ChatMessage(partial, isUser = false)
+                        }
+                    }.getOrElse { error ->
                         "Erro ao gerar resposta: ${error.message ?: "falha no modelo"}"
                     }
                 }

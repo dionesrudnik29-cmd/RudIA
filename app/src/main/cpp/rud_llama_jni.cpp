@@ -4,7 +4,6 @@
 #include <llama.h>
 #include <string>
 #include <vector>
-#include <memory>
 #include <mutex>
 
 #define LOG_TAG "RudLLM"
@@ -13,6 +12,17 @@ namespace {
     llama_model* g_model = nullptr;
     llama_context* g_context = nullptr;
     std::mutex g_mutex;
+
+    size_t completeUtf8Length(const std::string& s) {
+        size_t n = s.size();
+        for (size_t back = 1; back <= 4 && back <= n; ++back) {
+            unsigned char c = static_cast<unsigned char>(s[n - back]);
+            if ((c & 0xC0) == 0x80) continue;
+            size_t need = (c >= 0xF0) ? 4 : (c >= 0xE0) ? 3 : (c >= 0xC0) ? 2 : 1;
+            return back >= need ? n : n - back;
+        }
+        return n;
+    }
 }
 
 extern "C" {
@@ -66,7 +76,7 @@ Java_com_rud_ia_LocalModelEngine_nativeLoadModel(
 
 JNIEXPORT jstring JNICALL
 Java_com_rud_ia_LocalModelEngine_nativeGenerate(
-    JNIEnv* env, jobject, jstring prompt) {
+    JNIEnv* env, jobject, jstring prompt, jobject listener) {
 
     if (!prompt) return env->NewStringUTF("Digite uma mensagem.");
 
@@ -75,6 +85,12 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
 
     std::string input(raw);
     env->ReleaseStringUTFChars(prompt, raw);
+
+    jclass listenerClass = env->GetObjectClass(listener);
+    jmethodID onPartial = env->GetMethodID(
+        listenerClass, "onPartialAnswer", "(Ljava/lang/String;)V");
+    env->DeleteLocalRef(listenerClass);
+    if (!onPartial) return env->NewStringUTF("Erro interno ao preparar a resposta.");
 
     std::lock_guard<std::mutex> lock(g_mutex);
 
@@ -113,6 +129,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
     std::string output;
+    size_t sent = 0;
     const int max_tokens = 1024;
     int generated = 0;
 
@@ -129,6 +146,14 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
         if (len > 0) output.append(piece, len);
         generated++;
 
+        size_t safe = completeUtf8Length(output);
+        if (safe > sent) {
+            sent = safe;
+            jstring partial = env->NewStringUTF(output.substr(0, safe).c_str());
+            env->CallVoidMethod(listener, onPartial, partial);
+            env->DeleteLocalRef(partial);
+        }
+
         batch = llama_batch_get_one(&token, 1);
         if (llama_decode(g_context, batch) != 0) break;
     }
@@ -137,7 +162,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
                         "Resposta gerada com %d tokens", generated);
 
     llama_sampler_free(sampler);
-    return env->NewStringUTF(output.c_str());
+    return env->NewStringUTF(output.substr(0, completeUtf8Length(output)).c_str());
 }
 
 JNIEXPORT void JNICALL

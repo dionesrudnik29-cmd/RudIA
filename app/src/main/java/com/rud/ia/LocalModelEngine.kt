@@ -20,6 +20,10 @@ data class DownloadProgress(
     val bytesPerSecond: Long
 )
 
+fun interface PartialAnswerListener {
+    fun onPartialAnswer(text: String)
+}
+
 class LocalModelEngine(private val context: Context) {
 
     private val modelDir = File(context.filesDir, "models")
@@ -48,7 +52,7 @@ class LocalModelEngine(private val context: Context) {
     }
 
     private external fun nativeLoadModel(modelPath: String): Boolean
-    private external fun nativeGenerate(prompt: String): String
+    private external fun nativeGenerate(prompt: String, listener: PartialAnswerListener): String
     private external fun nativeReleaseModel()
 
     suspend fun downloadModel(
@@ -174,7 +178,7 @@ class LocalModelEngine(private val context: Context) {
     }
 
     @Synchronized
-    fun generate(prompt: String): Result<String> {
+    fun generate(prompt: String, onPartial: (String) -> Unit): Result<String> {
         if (prompt.isBlank()) {
             return Result.failure(
                 IllegalArgumentException("Digite uma mensagem.")
@@ -195,7 +199,10 @@ class LocalModelEngine(private val context: Context) {
         }
 
         return try {
-            val response = nativeGenerate(prompt.trim())
+            val response = nativeGenerate(
+                prompt.trim(),
+                PartialAnswerListener { text -> onPartial(text) }
+            )
 
             if (response.isBlank()) {
                 Result.failure(
