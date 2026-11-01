@@ -1,7 +1,7 @@
 # Rud IA
 
 Assistente de IA que roda 100% no celular (Android), usando o modelo local
-**Qwen3-4B Q4_K_M (GGUF, ~2,5 GB)** com llama.cpp. Sem respostas simuladas.
+**Qwen3-1.7B Q4_K_M (GGUF, ~1,1 GB)** com llama.cpp. Sem respostas simuladas.
 
 ## Como pegar o APK
 
@@ -16,7 +16,7 @@ Assistente de IA que roda 100% no celular (Android), usando o modelo local
 - O app abre e procura o modelo sozinho.
 - Se não encontrar, toque em **Baixar modelo** (use o Wi-Fi). Se cair, o
   download continua de onde parou.
-- Se já tiver o arquivo `Qwen3-4B-Q4_K_M.gguf` no celular, use **Importar .gguf**.
+- Se já tiver o arquivo `Qwen3-1.7B-Q4_K_M.gguf` no celular, use **Importar .gguf**.
 - Depois disso, o modelo carrega automaticamente toda vez que o app abre.
 
 ## Importante

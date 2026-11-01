@@ -98,13 +98,13 @@ Java_com_rud_ia_LocalModelEngine_nativeLoadModel(
     }
 
     const int threads = std::max(1, (int) nThreads);
-    int ctxSizes[] = {(int) nCtx, 2048, 1024};
+    int ctxSizes[] = {(int) nCtx, 1536, 1024};
     for (int size : ctxSizes) {
         if (size <= 0) continue;
         llama_context_params cp = llama_context_default_params();
         cp.n_ctx = (uint32_t) size;
-        cp.n_batch = 512;
-        cp.n_ubatch = 512;
+        cp.n_batch = 256;
+        cp.n_ubatch = 256;
         cp.n_threads = threads;
         cp.n_threads_batch = threads;
         g_context = llama_init_from_model(g_model, cp);
@@ -182,7 +182,7 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
     llama_memory_clear(llama_get_memory(g_context), true);
 
     // Processa o prompt em blocos de n_batch (evita erro com prompts longos).
-    const int nBatch = 512;
+    const int nBatch = 256;
     for (size_t i = 0; i < tokens.size(); i += nBatch) {
         if (g_stop.load()) return 0;
         int n = (int) std::min((size_t) nBatch, tokens.size() - i);

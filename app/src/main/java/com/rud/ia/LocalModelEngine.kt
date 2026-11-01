@@ -36,6 +36,13 @@ class LocalModelEngine private constructor(private val appContext: Context) {
     private val modelFile = File(modelDir, MODEL_FILE_NAME)
     private val partFile = File(modelDir, "$MODEL_FILE_NAME.part")
 
+    // Modelo antigo (Qwen3-4B, ≈2,5 GB). Pesado demais para o Snapdragon 685.
+    // Não é apagado sozinho: o usuário decide no menu se quer liberar o espaço.
+    private val legacyFiles = listOf(
+        File(modelDir, LEGACY_MODEL_FILE_NAME),
+        File(modelDir, "$LEGACY_MODEL_FILE_NAME.part")
+    )
+
     @Volatile
     var isLoaded: Boolean = false
         private set
@@ -59,6 +66,16 @@ class LocalModelEngine private constructor(private val appContext: Context) {
 
     fun partialBytes(): Long = if (partFile.isFile) partFile.length() else 0L
 
+    /** Quanto espaço o modelo antigo de 4B ainda ocupa (0 se não existir). */
+    fun legacyModelBytes(): Long = legacyFiles.filter { it.isFile }.sumOf { it.length() }
+
+    /** Apaga só o modelo antigo de 4B. Nunca toca no modelo atual nem nas conversas. */
+    fun deleteLegacyModel(): Boolean {
+        var ok = true
+        legacyFiles.forEach { if (it.exists() && !it.delete()) ok = false }
+        return ok
+    }
+
     /** Bloqueante. Chamar dentro de withContext(ModelDispatcher). */
     fun load() {
         nativeLibraryError?.let {
@@ -67,7 +84,7 @@ class LocalModelEngine private constructor(private val appContext: Context) {
         if (isLoaded) return
         if (!isModelInstalled()) throw ModelException("Arquivo do modelo não encontrado.")
 
-        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        val threads = ModelConfig.threadsFor(Runtime.getRuntime().availableProcessors())
         val error = try {
             nativeLoadModel(modelFile.absolutePath, chooseContextSize(), threads)
         } catch (e: OutOfMemoryError) {
@@ -86,12 +103,7 @@ class LocalModelEngine private constructor(private val appContext: Context) {
         val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val info = ActivityManager.MemoryInfo()
         am.getMemoryInfo(info)
-        val availGb = info.availMem / (1024.0 * 1024.0 * 1024.0)
-        return when {
-            availGb >= 3.5 -> 4096
-            availGb >= 2.0 -> 2048
-            else -> 1024
-        }
+        return ModelConfig.contextSizeFor(info.availMem)
     }
 
     /** Bloqueante. Conta tokens do texto (usado para caber no contexto). */
@@ -186,7 +198,7 @@ class LocalModelEngine private constructor(private val appContext: Context) {
         } ?: -1L
 
         if (size in 1 until MIN_MODEL_BYTES) {
-            throw ModelException("Esse arquivo é pequeno demais para ser o Qwen3-4B Q4_K_M (≈2,5 GB).")
+            throw ModelException("Esse arquivo é pequeno demais para ser um modelo de IA (.gguf).")
         }
         modelDir.mkdirs()
         partFile.delete()
@@ -263,11 +275,14 @@ class LocalModelEngine private constructor(private val appContext: Context) {
     }
 
     companion object {
-        const val MODEL_FILE_NAME = "Qwen3-4B-Q4_K_M.gguf"
+        // Qwen3-1.7B Q4_K_M (≈1,1 GB): mesma família e mesmo formato de conversa
+        // do Qwen3-4B, mas cerca de 2,5x mais leve e rápido no celular.
+        const val MODEL_FILE_NAME = "Qwen3-1.7B-Q4_K_M.gguf"
         const val MODEL_URL =
-            "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true"
-        const val MIN_MODEL_BYTES = 2_000_000_000L
-        const val EXPECTED_MODEL_BYTES = 2_500_000_000L
+            "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true"
+        const val MIN_MODEL_BYTES = 800_000_000L
+        const val EXPECTED_MODEL_BYTES = 1_107_409_472L
+        const val LEGACY_MODEL_FILE_NAME = "Qwen3-4B-Q4_K_M.gguf"
 
         val nativeLibraryError: String? = try {
             System.loadLibrary("rud_llama_jni")

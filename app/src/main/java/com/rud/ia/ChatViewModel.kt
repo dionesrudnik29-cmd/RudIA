@@ -34,7 +34,8 @@ data class UiState(
     val conversations: List<Conversation> = emptyList(),
     val currentId: String? = null,
     val generating: Boolean = false,
-    val partialDownloadBytes: Long = 0L
+    val partialDownloadBytes: Long = 0L,
+    val legacyModelBytes: Long = 0L
 ) {
     val current: Conversation? get() = conversations.firstOrNull { it.id == currentId }
 }
@@ -78,6 +79,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Modelo ----------
 
     fun checkModel() {
+        refreshLegacy()
         if (transferJob?.isActive == true) return
         if (engine.isLoaded) {
             setModel(ModelStatus.Ready)
@@ -134,6 +136,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Throwable) {
                 setModel(ModelStatus.Error(friendly(e), modelPresent = false))
             }
+        }
+    }
+
+    private fun refreshLegacy() {
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) { engine.legacyModelBytes() }
+            _state.update { it.copy(legacyModelBytes = bytes) }
+        }
+    }
+
+    /** Apaga o modelo antigo de 4B para liberar espaço. Conversas não são tocadas. */
+    fun deleteLegacyModel() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { engine.deleteLegacyModel() }
+            refreshLegacy()
         }
     }
 

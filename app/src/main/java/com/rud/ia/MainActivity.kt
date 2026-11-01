@@ -59,6 +59,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,6 +74,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
@@ -359,7 +361,8 @@ private fun RudApp(vm: ChatViewModel, state: UiState) {
                             vm.selectConversation(id)
                             scope.launch { drawerState.close() }
                         },
-                        onDelete = { id -> deleteWithUndo(id) }
+                        onDelete = { id -> deleteWithUndo(id) },
+                        onDeleteLegacy = { vm.deleteLegacyModel() }
                     )
                 }
             }
@@ -541,7 +544,7 @@ private fun StatusLine(model: ModelStatus) {
         is ModelStatus.Downloading -> WarnAmber to "Baixando… ${percent(model.done, model.total)}"
         is ModelStatus.Importing -> WarnAmber to "Importando… ${percent(model.done, model.total)}"
         ModelStatus.Loading -> WarnAmber to "Carregando a IA…"
-        ModelStatus.Ready -> ReadyGreen to "Online · Qwen3-4B local"
+        ModelStatus.Ready -> ReadyGreen to "Online · Qwen3-1.7B local"
         is ModelStatus.Error -> ErrorRed to "Erro no modelo"
     }
     val t = rememberInfiniteTransition(label = "status")
@@ -724,7 +727,7 @@ private fun ModelCard(
             }
 
             ModelStatus.Loading -> {
-                Text("Carregando o Qwen3-4B na memória…", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("Carregando o Qwen3-1.7B na memória…", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text("Leva alguns segundos e acontece sozinho.", color = Muted, fontSize = 12.sp)
                 Spacer(Modifier.height(10.dp))
                 GlowProgress()
@@ -788,8 +791,8 @@ private fun InstallOptions(error: String?, partialBytes: Long, onDownload: () ->
         Spacer(Modifier.height(4.dp))
     }
     Text(
-        "O Rud IA usa o Qwen3-4B (Q4_K_M, ≈2,5 GB), que fica salvo só neste app. " +
-            "Baixe uma única vez pelo Wi-Fi ou, se já tiver o arquivo .gguf no celular, importe-o.",
+        "O Rud IA usa o Qwen3-1.7B (≈1,1 GB), leve o bastante para rodar bem no celular. " +
+            "Ele fica salvo só neste app. Baixe uma única vez pelo Wi-Fi ou, se já tiver o arquivo .gguf, importe-o.",
         color = Muted,
         fontSize = 12.sp
     )
@@ -924,9 +927,34 @@ private fun HistoryDrawer(
     state: UiState,
     onNew: () -> Unit,
     onSelect: (String) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    onDeleteLegacy: () -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("dd/MM HH:mm", Locale("pt", "BR")) }
+    var confirmLegacy by remember { mutableStateOf(false) }
+
+    if (confirmLegacy) {
+        AlertDialog(
+            onDismissRequest = { confirmLegacy = false },
+            containerColor = PanelHigh,
+            title = { Text("Apagar a IA antiga?", color = TextWhite, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "A versão antiga (Qwen3-4B) era pesada demais para este celular e não é mais usada. " +
+                        "Apagar libera ${gb(state.legacyModelBytes)}. Suas conversas não serão apagadas.",
+                    color = Muted
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmLegacy = false; onDeleteLegacy() }) {
+                    Text("Apagar", color = ErrorRed, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLegacy = false }) { Text("Cancelar", color = Neon) }
+            }
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -956,7 +984,10 @@ private fun HistoryDrawer(
         Text("RECENTES", color = Muted.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
         Spacer(Modifier.height(8.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.weight(1f)
+        ) {
             items(state.conversations, key = { it.id }) { conv ->
                 val selected = conv.id == state.currentId
                 Row(
@@ -1002,6 +1033,26 @@ private fun HistoryDrawer(
                     IconButton(onClick = { onDelete(conv.id) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Apagar conversa", tint = Muted)
                     }
+                }
+            }
+        }
+
+        if (state.legacyModelBytes > 0) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, Violet.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                    .clickable { confirmLegacy = true }
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = null, tint = Neon)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Liberar espaço", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("IA antiga ocupa ${gb(state.legacyModelBytes)}", color = Muted, fontSize = 11.sp)
                 }
             }
         }

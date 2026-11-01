@@ -24,8 +24,13 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-# Helio G85 (Redmi Note 13 4G): Cortex-A75 + A55 => ARMv8.2-A com dotprod.
-set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+# Redmi Note 13 4G = Snapdragon 685 (Kryo 265: Cortex-A73 + Cortex-A53).
+# Esses núcleos são ARMv8.0-A: NÃO têm "dotprod" nem "fp16".
+# Antes o motor era compilado com "armv8.2-a+dotprod+fp16"; o modelo até
+# carregava, mas ao gerar a primeira palavra o processador encontrava uma
+# instrução que não conhece (SIGILL) e o Android fechava o app na hora.
+# "armv8-a" (NEON) roda em qualquer celular Android de 64 bits.
+set(GGML_CPU_ARM_ARCH "armv8-a" CACHE STRING "" FORCE)
 
 # Versão FIXA do llama.cpp. Antes era "master", o que fazia o build quebrar
 # sozinho sempre que a API do llama.cpp mudava.
