@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.UUID
@@ -28,6 +29,18 @@ sealed interface ModelStatus {
     data class Error(val message: String, val modelPresent: Boolean) : ModelStatus
 }
 
+/** Situação do leitor de imagens (usado só quando o usuário manda uma foto). */
+sealed interface VisionStatus {
+    data object Checking : VisionStatus
+    data object Missing : VisionStatus
+    data class Downloading(val done: Long, val total: Long) : VisionStatus
+    data object Ready : VisionStatus
+    data class Error(val message: String) : VisionStatus
+}
+
+/** Etapa da resposta em andamento, para mostrar no balão. */
+enum class GenerationPhase { READING_IMAGE, THINKING }
+
 data class UiState(
     val historyLoaded: Boolean = false,
     val model: ModelStatus = ModelStatus.Checking,
@@ -35,7 +48,15 @@ data class UiState(
     val currentId: String? = null,
     val generating: Boolean = false,
     val partialDownloadBytes: Long = 0L,
-    val legacyModelBytes: Long = 0L
+    val legacyModelBytes: Long = 0L,
+    val vision: VisionStatus = VisionStatus.Checking,
+    val visionPartialBytes: Long = 0L,
+    /** Foto escolhida e ainda não enviada. */
+    val attachment: String? = null,
+    val preparingAttachment: Boolean = false,
+    val phase: GenerationPhase? = null,
+    /** Aviso curto para mostrar na tela (consumido pela interface). */
+    val notice: String? = null
 ) {
     val current: Conversation? get() = conversations.firstOrNull { it.id == currentId }
 }
@@ -49,7 +70,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var transferJob: Job? = null
+    private var visionJob: Job? = null
     private var generationJob: Job? = null
+    private val imagesDir = ImageTools.imagesDir(app)
 
     @Volatile
     private var stopRequested = false
@@ -73,6 +96,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 2) Verifica e carrega o modelo automaticamente.
             checkModel()
+            // 3) Leitor de imagens e limpeza de fotos que não pertencem a nenhuma conversa.
+            checkVision()
+            cleanOrphanImages(list)
         }
     }
 
@@ -169,27 +195,135 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         else -> e.message ?: "Erro desconhecido."
     }
 
+    // ---------- Leitor de imagens ----------
+
+    fun checkVision() {
+        if (visionJob?.isActive == true) return
+        viewModelScope.launch {
+            val installed = withContext(Dispatchers.IO) { engine.isVisionInstalled() }
+            val partial = withContext(Dispatchers.IO) { engine.visionPartialBytes() }
+            _state.update {
+                it.copy(
+                    vision = if (installed) VisionStatus.Ready else VisionStatus.Missing,
+                    visionPartialBytes = partial
+                )
+            }
+        }
+    }
+
+    fun downloadVision() {
+        if (visionJob?.isActive == true) return
+        visionJob = viewModelScope.launch {
+            setVision(VisionStatus.Downloading(engine.visionPartialBytes(), LocalModelEngine.VISION_TOTAL_BYTES))
+            try {
+                engine.downloadVision { done, total -> setVision(VisionStatus.Downloading(done, total)) }
+                setVision(VisionStatus.Ready)
+                notify("Pronto! Agora a Rud IA consegue ver suas fotos 📷")
+            } catch (e: CancellationException) {
+                _state.update { it.copy(visionPartialBytes = engine.visionPartialBytes()) }
+                setVision(VisionStatus.Missing)
+                throw e
+            } catch (e: Throwable) {
+                _state.update { it.copy(visionPartialBytes = engine.visionPartialBytes()) }
+                setVision(VisionStatus.Error(friendly(e)))
+            }
+        }
+    }
+
+    fun cancelVisionDownload() {
+        visionJob?.cancel()
+    }
+
+    private fun setVision(status: VisionStatus) {
+        _state.update { it.copy(vision = status) }
+    }
+
+    /** Prepara a foto escolhida (reduz e salva) para enviar na próxima mensagem. */
+    fun attachImage(uri: Uri) {
+        if (_state.value.preparingAttachment) return
+        _state.update { it.copy(preparingAttachment = true) }
+        viewModelScope.launch {
+            try {
+                val file = File(imagesDir, "pending_${newId()}.jpg")
+                withContext(Dispatchers.IO) { ImageTools.prepare(getApplication<Application>(), uri, file) }
+                val old = _state.value.attachment
+                _state.update { it.copy(attachment = file.absolutePath) }
+                if (old != null) withContext(Dispatchers.IO) { File(old).delete() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                notify(if (e is OutOfMemoryError) "Essa foto é grande demais." else (e.message ?: "Não foi possível abrir essa foto."))
+            } finally {
+                _state.update { it.copy(preparingAttachment = false) }
+            }
+        }
+    }
+
+    fun removeAttachment() {
+        val path = _state.value.attachment ?: return
+        _state.update { it.copy(attachment = null) }
+        viewModelScope.launch(Dispatchers.IO) { File(path).delete() }
+    }
+
+    fun consumeNotice() {
+        _state.update { it.copy(notice = null) }
+    }
+
+    private fun notify(message: String) {
+        _state.update { it.copy(notice = message) }
+    }
+
+    /** Apaga fotos que não estão em nenhuma conversa (sobras de exclusões antigas). */
+    private fun cleanOrphanImages(conversations: List<Conversation>) {
+        val startedAt = System.currentTimeMillis()
+        viewModelScope.launch(Dispatchers.IO) {
+            val used = conversations.flatMap { c -> c.messages.mapNotNull { it.imagePath } }.toSet()
+            imagesDir.listFiles()?.forEach { f ->
+                // Nunca apaga uma foto escolhida agora há pouco (ainda não enviada).
+                if (f.absolutePath !in used && f.lastModified() < startedAt) f.delete()
+            }
+        }
+    }
+
     // ---------- Conversa ----------
 
     fun send(text: String): Boolean {
         val prompt = text.trim()
         val s = _state.value
-        if (prompt.isEmpty() || s.generating || s.model !is ModelStatus.Ready) return false
+        val pending = s.attachment
+        if ((prompt.isEmpty() && pending == null) || s.generating || s.preparingAttachment) return false
+        if (s.model !is ModelStatus.Ready) return false
+        if (pending != null && s.vision !is VisionStatus.Ready) {
+            notify("Baixe o leitor de imagens para a Rud IA ver fotos.")
+            return false
+        }
         val convId = s.currentId ?: return false
 
         val history = s.current?.messages.orEmpty()
-        val userMsg = ChatMessage(newId(), Role.USER, prompt)
+        val userId = newId()
+        // A foto deixa de ser "pendente" e passa a pertencer à mensagem.
+        val imagePath = pending?.let { path ->
+            val target = File(imagesDir, "$userId.jpg")
+            if (File(path).renameTo(target)) target.absolutePath else path
+        }
+        val userMsg = ChatMessage(userId, Role.USER, prompt, imagePath = imagePath)
         val botMsg = ChatMessage(newId(), Role.ASSISTANT, "", MessageStatus.PENDING)
 
         updateConversation(convId) { c ->
             c.copy(
-                title = if (c.messages.isEmpty()) PromptBuilder.makeTitle(prompt) else c.title,
+                title = if (c.messages.isEmpty()) PromptBuilder.makeTitle(prompt.ifEmpty { "📷 Foto" }) else c.title,
                 updatedAt = System.currentTimeMillis(),
                 messages = c.messages + userMsg + botMsg
             )
         }
         stopRequested = false
-        _state.update { it.copy(generating = true) }
+        _state.update {
+            it.copy(
+                generating = true,
+                attachment = null,
+                phase = if (imagePath != null) GenerationPhase.READING_IMAGE else GenerationPhase.THINKING
+            )
+        }
         persist()
 
         generationJob = viewModelScope.launch {
@@ -197,9 +331,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             var status = MessageStatus.DONE
             try {
                 finalText = withContext(ModelDispatcher) {
+                    var description: String? = null
+                    if (imagePath != null) {
+                        val image = ImageTools.loadRgb(File(imagePath))
+                        val seen = engine.describeImage(image)
+                        description = seen
+                        if (stopRequested) return@withContext ""
+                        if (seen.isBlank()) {
+                            throw ModelException("O leitor de imagens não conseguiu entender essa foto. Tente outra.")
+                        }
+                        updateMessage(convId, userMsg.id) { it.copy(imageDescription = seen) }
+                        persist()
+                        _state.update { it.copy(phase = GenerationPhase.THINKING) }
+                    }
                     val ctx = engine.contextSize
                     val maxNew = PromptBuilder.maxNewTokens(ctx)
-                    val fullPrompt = PromptBuilder.build(history, prompt, ctx, maxNew) { engine.countTokens(it) }
+                    val fullPrompt = PromptBuilder.build(
+                        history = history,
+                        userText = prompt,
+                        contextSize = ctx,
+                        maxNewTokens = maxNew,
+                        countTokens = { engine.countTokens(it) },
+                        imageDescription = description
+                    )
                     val raw = engine.generate(fullPrompt, maxNew) { partial ->
                         val shown = PromptBuilder.clean(partial)
                         updateMessage(convId, botMsg.id) { it.copy(text = shown) }
@@ -228,7 +382,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 updateMessage(convId, botMsg.id) { it.copy(text = text, status = status) }
                 updateConversation(convId) { it.copy(updatedAt = System.currentTimeMillis()) }
-                _state.update { it.copy(generating = false) }
+                _state.update { it.copy(generating = false, phase = null) }
                 withContext(NonCancellable) { store.save { _state.value.conversations } }
             }
         }

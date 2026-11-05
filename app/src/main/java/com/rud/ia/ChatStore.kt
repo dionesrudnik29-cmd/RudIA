@@ -60,6 +60,10 @@ class ChatStore(context: Context) {
                         .put("role", m.role.name)
                         .put("text", m.text)
                         .put("status", m.status.name)
+                        .apply {
+                            m.imagePath?.let { put("imagePath", it) }
+                            m.imageDescription?.let { put("imageDescription", it) }
+                        }
                 )
             }
             array.put(
@@ -90,7 +94,9 @@ class ChatStore(context: Context) {
                         role = runCatching { Role.valueOf(m.getString("role")) }.getOrDefault(Role.ASSISTANT),
                         text = m.optString("text", ""),
                         status = runCatching { MessageStatus.valueOf(m.optString("status")) }
-                            .getOrDefault(MessageStatus.DONE)
+                            .getOrDefault(MessageStatus.DONE),
+                        imagePath = m.optString("imagePath", "").ifBlank { null },
+                        imageDescription = m.optString("imageDescription", "").ifBlank { null }
                     )
                 }
             )

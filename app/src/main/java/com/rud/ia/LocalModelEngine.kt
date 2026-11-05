@@ -43,6 +43,11 @@ class LocalModelEngine private constructor(private val appContext: Context) {
         File(modelDir, "$LEGACY_MODEL_FILE_NAME.part")
     )
 
+    // Leitor de imagens (SmolVLM2-500M + projetor de visão, ≈550 MB no total).
+    // Fica separado da IA principal e só é carregado ao analisar uma foto.
+    private val visionModelFile = File(modelDir, VISION_MODEL_FILE_NAME)
+    private val visionProjFile = File(modelDir, VISION_PROJ_FILE_NAME)
+
     @Volatile
     var isLoaded: Boolean = false
         private set
@@ -57,6 +62,17 @@ class LocalModelEngine private constructor(private val appContext: Context) {
     private external fun nativeGenerate(prompt: String, maxTokens: Int, callback: TokenCallback): Int
     private external fun nativeStop()
     private external fun nativeReleaseModel()
+    private external fun nativeDescribeImage(
+        modelPath: String,
+        mmprojPath: String,
+        rgb: ByteArray,
+        width: Int,
+        height: Int,
+        prompt: String,
+        maxTokens: Int,
+        nThreads: Int,
+        callback: TokenCallback
+    )
 
     /** Verifica se o arquivo existe, tem tamanho plausível e cabeçalho GGUF. */
     fun isModelInstalled(): Boolean {
@@ -123,7 +139,8 @@ class LocalModelEngine private constructor(private val appContext: Context) {
                 val now = System.currentTimeMillis()
                 if (now - lastEmit >= 80L) {
                     lastEmit = now
-                    onText(buffer.toString("UTF-8"))
+                    // Só caracteres completos: evita "�" no meio de emojis.
+                    onText(Utf8.decodeComplete(buffer.toByteArray()))
                 }
                 true
             })
@@ -136,6 +153,129 @@ class LocalModelEngine private constructor(private val appContext: Context) {
         onText(text)
         return text
     }
+
+    // ---------- Leitor de imagens ----------
+
+    fun isVisionInstalled(): Boolean =
+        visionModelFile.isFile && visionModelFile.length() == VISION_MODEL_BYTES && hasGgufHeader(visionModelFile) &&
+            visionProjFile.isFile && visionProjFile.length() == VISION_PROJ_BYTES && hasGgufHeader(visionProjFile)
+
+    /**
+     * Bloqueante. Chamar dentro de withContext(ModelDispatcher).
+     * Descreve a foto (em inglês) usando o leitor de imagens local.
+     */
+    fun describeImage(image: RgbImage): String {
+        nativeLibraryError?.let {
+            throw ModelException("A parte nativa do app não foi carregada ($it). Reinstale o APK.")
+        }
+        if (!isVisionInstalled()) throw ModelException("O leitor de imagens não está instalado.")
+        val buffer = ByteArrayOutputStream()
+        val threads = ModelConfig.threadsFor(Runtime.getRuntime().availableProcessors())
+        try {
+            nativeDescribeImage(
+                visionModelFile.absolutePath,
+                visionProjFile.absolutePath,
+                image.pixels,
+                image.width,
+                image.height,
+                PromptBuilder.VISION_PROMPT,
+                PromptBuilder.VISION_MAX_TOKENS,
+                threads,
+                TokenCallback { bytes ->
+                    buffer.write(bytes, 0, bytes.size)
+                    true
+                }
+            )
+        } catch (e: OutOfMemoryError) {
+            throw ModelException("Memória insuficiente para analisar a imagem. Feche outros aplicativos.", e)
+        } catch (e: IllegalStateException) {
+            throw ModelException(e.message ?: "Falha ao analisar a imagem.", e)
+        }
+        return PromptBuilder.cleanDescription(buffer.toString("UTF-8"))
+    }
+
+    /** Baixa o leitor de imagens (dois arquivos), retomando se cair. */
+    suspend fun downloadVision(onProgress: (Long, Long) -> Unit) = withContext(Dispatchers.IO) {
+        modelDir.mkdirs()
+        val total = VISION_TOTAL_BYTES
+        val parts = listOf(
+            Triple(VISION_MODEL_URL, visionModelFile, VISION_MODEL_BYTES),
+            Triple(VISION_PROJ_URL, visionProjFile, VISION_PROJ_BYTES)
+        )
+        var needed = 0L
+        for ((_, file, size) in parts) {
+            if (file.isFile && file.length() == size) continue
+            val part = partOf(file)
+            needed += size - (if (part.isFile) part.length() else 0L)
+        }
+        ensureSpace(needed)
+
+        var before = 0L
+        for ((url, file, size) in parts) {
+            if (file.isFile && file.length() == size) {
+                before += size
+                onProgress(before, total)
+                continue
+            }
+            val offset = before
+            val part = partOf(file)
+            fetchResumable(url, part, size) { done, _ -> onProgress(offset + done, total) }
+            if (part.length() != size || !hasGgufHeader(part)) {
+                part.delete()
+                throw ModelException("O arquivo do leitor de imagens veio corrompido. Tente baixar de novo.")
+            }
+            if (file.exists()) file.delete()
+            if (!part.renameTo(file)) throw ModelException("Não foi possível salvar o leitor de imagens.")
+            before += size
+        }
+        onProgress(total, total)
+    }
+
+    fun visionPartialBytes(): Long {
+        var sum = 0L
+        for (f in listOf(visionModelFile, visionProjFile)) {
+            val part = partOf(f)
+            sum += when {
+                f.isFile -> f.length()
+                part.isFile -> part.length()
+                else -> 0L
+            }
+        }
+        return sum
+    }
+
+    private fun partOf(file: File) = File(file.parentFile, file.name + ".part")
+
+    /** Download com retomada (cabeçalho Range) para um arquivo .part. */
+    private suspend fun fetchResumable(url: String, part: File, expected: Long, onProgress: (Long, Long) -> Unit) =
+        withContext(Dispatchers.IO) {
+            var existing = if (part.isFile) part.length() else 0L
+            if (existing >= expected) return@withContext
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 30_000
+                readTimeout = 60_000
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", "RudIA-Android")
+                if (existing > 0) setRequestProperty("Range", "bytes=$existing-")
+            }
+            try {
+                val code = connection.responseCode
+                if (code == 416 && existing > 0) return@withContext
+                if (code !in 200..299) throw ModelException("O servidor respondeu com erro HTTP $code.")
+                val append = code == 206
+                if (!append) existing = 0L
+                connection.inputStream.use { input ->
+                    FileOutputStream(part, append).use { output ->
+                        copyWithProgress(input, output, existing, expected, onProgress) { ensureActive() }
+                    }
+                }
+                if (part.length() != expected) {
+                    throw ModelException("Download incompleto. Toque em Baixar para continuar de onde parou.")
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
 
     fun stop() {
         if (nativeLibraryError == null) nativeStop()
@@ -283,6 +423,17 @@ class LocalModelEngine private constructor(private val appContext: Context) {
         const val MIN_MODEL_BYTES = 800_000_000L
         const val EXPECTED_MODEL_BYTES = 1_107_409_472L
         const val LEGACY_MODEL_FILE_NAME = "Qwen3-4B-Q4_K_M.gguf"
+
+        // Leitor de imagens: SmolVLM2-500M (ggml-org), versão fixa do repositório.
+        private const val VISION_REPO =
+            "https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/ccd7aae53bcb1997355c2f094959e72b3642ce17"
+        const val VISION_MODEL_FILE_NAME = "SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+        const val VISION_PROJ_FILE_NAME = "mmproj-SmolVLM2-500M-Video-Instruct-Q8_0.gguf"
+        const val VISION_MODEL_URL = "$VISION_REPO/$VISION_MODEL_FILE_NAME?download=true"
+        const val VISION_PROJ_URL = "$VISION_REPO/$VISION_PROJ_FILE_NAME?download=true"
+        const val VISION_MODEL_BYTES = 436_808_704L
+        const val VISION_PROJ_BYTES = 108_785_184L
+        const val VISION_TOTAL_BYTES = VISION_MODEL_BYTES + VISION_PROJ_BYTES
 
         val nativeLibraryError: String? = try {
             System.loadLibrary("rud_llama_jni")

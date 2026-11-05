@@ -19,6 +19,16 @@ Assistente de IA que roda 100% no celular (Android), usando o modelo local
 - Se já tiver o arquivo `Qwen3-1.7B-Q4_K_M.gguf` no celular, use **Importar .gguf**.
 - Depois disso, o modelo carrega automaticamente toda vez que o app abre.
 
+## Fotos e emojis
+
+- A Rud IA responde usando emojis de forma natural.
+- Toque no **+** ao lado do campo de texto para tirar uma foto, escolher da
+  galeria ou inserir emojis.
+- Na primeira foto o app pede para baixar o **leitor de imagens**
+  (SmolVLM2-500M, ~550 MB, uma única vez). Depois funciona sem internet.
+- A foto é analisada pelo leitor de imagens no próprio celular e a descrição
+  é entregue ao Qwen3, que responde em português. Leva de 20 a 60 segundos.
+
 ## Importante
 
 - Identificador do app: `com.rudia.ia`. **Não mude**: o Android trata outro

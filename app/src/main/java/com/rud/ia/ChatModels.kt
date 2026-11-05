@@ -17,7 +17,11 @@ data class ChatMessage(
     val id: String,
     val role: Role,
     val text: String,
-    val status: MessageStatus = MessageStatus.DONE
+    val status: MessageStatus = MessageStatus.DONE,
+    /** Foto enviada junto com a mensagem (arquivo no armazenamento do app). */
+    val imagePath: String? = null,
+    /** O que o leitor de imagens viu na foto; reaproveitado nas perguntas seguintes. */
+    val imageDescription: String? = null
 )
 
 data class Conversation(

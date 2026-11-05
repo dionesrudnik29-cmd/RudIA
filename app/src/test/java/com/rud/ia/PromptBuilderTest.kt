@@ -56,4 +56,43 @@ class PromptBuilderTest {
         assertEquals(40, title.length)
         assertTrue(title.endsWith("…"))
     }
+
+    @Test
+    fun photoDescriptionGoesToTheMainAi() {
+        val prompt = PromptBuilder.build(emptyList(), "Que cachorro é esse?", 4096, 512, countChars, "A yellow labrador.")
+        assertTrue(prompt.contains("A yellow labrador."))
+        assertTrue(prompt.contains("Que cachorro é esse?"))
+    }
+
+    @Test
+    fun photoWithoutTextStillAsksForAComment() {
+        val prompt = PromptBuilder.build(emptyList(), "", 4096, 512, countChars, "A beach at sunset.")
+        assertTrue(prompt.contains("A beach at sunset."))
+        assertTrue(prompt.contains("Comente esta foto."))
+    }
+
+    @Test
+    fun earlierPhotoIsRememberedInFollowUpQuestions() {
+        val history = listOf(
+            ChatMessage("1", Role.USER, "", imagePath = "/x.jpg", imageDescription = "A red car."),
+            msg(Role.ASSISTANT, "É um carro vermelho 🚗")
+        )
+        val prompt = PromptBuilder.build(history, "De que ano ele parece?", 4096, 512, countChars)
+        assertTrue(prompt.contains("A red car."))
+    }
+
+    @Test
+    fun descriptionStopsWhenReaderStartsInventingTheUser() {
+        assertEquals("A cat on a sofa.", PromptBuilder.cleanDescription(" A cat on a sofa.\nUser: what"))
+    }
+
+    @Test
+    fun descriptionDropsUnfinishedLastSentence() {
+        assertEquals("A cat on a sofa.", PromptBuilder.cleanDescription("A cat on a sofa. It looks very"))
+    }
+
+    @Test
+    fun brokenEmojiMarkIsRemovedFromAnswer() {
+        assertEquals("Oi", PromptBuilder.clean("Oi\uFFFD"))
+    }
 }

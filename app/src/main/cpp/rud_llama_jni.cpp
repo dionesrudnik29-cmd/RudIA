@@ -2,6 +2,8 @@
 #include <android/log.h>
 #include <llama.h>
 
+#include "rud_vision.h"
+
 #include <algorithm>
 #include <atomic>
 #include <mutex>
@@ -240,6 +242,61 @@ Java_com_rud_ia_LocalModelEngine_nativeGenerate(
         throwJava(env, error);
     }
     return generated;
+}
+
+// Analisa uma imagem com o leitor de imagens (SmolVLM). Carrega, descreve e
+// libera o modelo de visão na mesma chamada. Os pedaços de texto vão para o
+// callback. Lança IllegalStateException em erro.
+JNIEXPORT void JNICALL
+Java_com_rud_ia_LocalModelEngine_nativeDescribeImage(
+    JNIEnv* env, jobject, jstring modelPath, jstring mmprojPath, jbyteArray rgb,
+    jint width, jint height, jstring prompt, jint maxTokens, jint nThreads, jobject callback) {
+
+    std::call_once(g_backend_once, []() {
+        llama_log_set(logCallback, nullptr);
+        llama_backend_init();
+    });
+
+    std::string model = jstringToStd(env, modelPath);
+    std::string mmproj = jstringToStd(env, mmprojPath);
+    std::string text = jstringToStd(env, prompt);
+    if (!rgb || model.empty() || mmproj.empty() || text.empty()) {
+        throwJava(env, "Dados da imagem inválidos.");
+        return;
+    }
+    const jsize n = env->GetArrayLength(rgb);
+    if ((long long) n != (long long) width * (long long) height * 3LL) {
+        throwJava(env, "Tamanho da imagem inválido.");
+        return;
+    }
+
+    jclass cbClass = env->FindClass("com/rud/ia/TokenCallback");
+    if (!cbClass) return;
+    jmethodID onToken = env->GetMethodID(cbClass, "onToken", "([B)Z");
+    if (!onToken) return;
+
+    std::vector<unsigned char> pixels((size_t) n);
+    env->GetByteArrayRegion(rgb, 0, n, reinterpret_cast<jbyte*>(pixels.data()));
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_stop.store(false);
+
+    std::string error = rud::describe_image(
+        model, mmproj, pixels.data(), (int) width, (int) height, text,
+        (int) maxTokens, std::max(1, (int) nThreads), g_stop,
+        [&](const char* piece, int len) -> bool {
+            jbyteArray bytes = env->NewByteArray(len);
+            env->SetByteArrayRegion(bytes, 0, len, reinterpret_cast<const jbyte*>(piece));
+            jboolean keepGoing = env->CallBooleanMethod(callback, onToken, bytes);
+            env->DeleteLocalRef(bytes);
+            if (env->ExceptionCheck()) return false;
+            return keepGoing == JNI_TRUE;
+        });
+
+    if (!error.empty() && !env->ExceptionCheck()) {
+        LOGE("Falha na análise de imagem: %s", error.c_str());
+        throwJava(env, error);
+    }
 }
 
 JNIEXPORT void JNICALL

@@ -19,6 +19,9 @@ set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+# Biblioteca de imagens do llama.cpp (mtmd), usada para analisar fotos.
+set(LLAMA_BUILD_MTMD ON CACHE BOOL "" FORCE)
+set(MTMD_VIDEO OFF CACHE BOOL "" FORCE)
 set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
@@ -43,6 +46,7 @@ FetchContent_MakeAvailable(llama_cpp)
 
 add_library(rud_llama_jni SHARED
     rud_llama_jni.cpp
+    rud_vision.cpp
 )
 
 target_compile_options(rud_llama_jni PRIVATE -O3)
@@ -50,5 +54,5 @@ target_compile_options(rud_llama_jni PRIVATE -O3)
 find_library(log-lib log)
 
 target_link_libraries(rud_llama_jni
-    PRIVATE llama ${log-lib} android
+    PRIVATE llama mtmd ${log-lib} android
 )
