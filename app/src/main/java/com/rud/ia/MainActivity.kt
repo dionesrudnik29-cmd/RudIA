@@ -592,7 +592,8 @@ private fun ChatScreen(
                     item(key = "fim") { Spacer(Modifier.height(1.dp)) }
                 }
 
-                AnimatedVisibility(
+                // Versão sem escopo: aqui estamos dentro de um Box que fica num Column.
+                androidx.compose.animation.AnimatedVisibility(
                     visible = !atBottom,
                     enter = fadeIn() + scaleIn(),
                     exit = fadeOut() + scaleOut(),
