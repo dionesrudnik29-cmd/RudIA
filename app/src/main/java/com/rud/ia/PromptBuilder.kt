@@ -31,7 +31,8 @@ object PromptBuilder {
     private const val SAFETY_TOKENS = 32
 
     /** Quantos tokens novos pedir, de acordo com o tamanho do contexto. */
-    fun maxNewTokens(contextSize: Int): Int = (contextSize / 3).coerceIn(128, 768)
+    fun maxNewTokens(contextSize: Int, thinking: Boolean = false): Int =
+        if (thinking) (contextSize / 2).coerceIn(256, 1280) else (contextSize / 3).coerceIn(128, 768)
 
     /** Texto que a IA principal recebe para uma mensagem (com ou sem foto). */
     fun userContent(text: String, imageDescription: String?): String {
@@ -52,13 +53,14 @@ object PromptBuilder {
         contextSize: Int,
         maxNewTokens: Int,
         countTokens: (String) -> Int,
-        imageDescription: String? = null
+        imageDescription: String? = null,
+        thinking: Boolean = false
     ): String {
         val head = "<|im_start|>system\n$SYSTEM_PROMPT<|im_end|>\n"
-        // O bloco <think> vazio desliga o "modo raciocínio" do Qwen3:
-        // a resposta começa direto, sem gastar tokens pensando.
+        // Bloco <think> vazio = sem raciocínio (resposta direta).
+        // Só "<think>\n" = o Qwen3 escreve o raciocínio antes de responder.
         val tail = "<|im_start|>user\n${userContent(userText, imageDescription)}<|im_end|>\n" +
-            "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            "<|im_start|>assistant\n" + (if (thinking) "<think>\n" else "<think>\n\n</think>\n\n")
 
         val turns = history
             .filter {
@@ -82,6 +84,19 @@ object PromptBuilder {
         }
         return prompt
     }
+
+    /**
+     * Separa o raciocínio da resposta quando o prompt terminou em "<think>\n":
+     * tudo antes de "</think>" é pensamento. Retorna (pensamento, resposta).
+     */
+    fun splitThinking(raw: String): Pair<String, String> {
+        val body = raw.replace("<think>", "")
+        val end = body.indexOf("</think>")
+        if (end < 0) return Pair(tidy(body).trim(), "")
+        return Pair(tidy(body.substring(0, end)).trim(), clean(body.substring(end + "</think>".length)))
+    }
+
+    private fun tidy(s: String) = s.replace("<|im_end|>", "").replace("<|im_start|>", "").replace("\uFFFD", "")
 
     /** Remove blocos de raciocínio e marcas de controle da resposta. */
     fun clean(raw: String): String {

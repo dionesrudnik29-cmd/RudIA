@@ -457,7 +457,8 @@ private fun RudApp(vm: ChatViewModel, state: UiState) {
                         },
                         onDelete = { id -> deleteWithUndo(id) },
                         onDeleteLegacy = { vm.deleteLegacyModel() },
-                        onVision = { showVisionDialog = true }
+                        onVision = { showVisionDialog = true },
+                        onToggleThinking = { vm.setShowThinking(it) }
                     )
                 }
             }
@@ -1216,6 +1217,12 @@ private fun MessageBubble(message: ChatMessage, phase: GenerationPhase?, onOpenI
                 if (message.text.isNotBlank()) Spacer(Modifier.height(6.dp))
             }
 
+            val thought = message.thinking
+            if (!isUser && !thought.isNullOrBlank()) {
+                ThinkingCard(thought, live = message.status == MessageStatus.PENDING && message.text.isBlank())
+                Spacer(Modifier.height(6.dp))
+            }
+
             val shape = if (isUser) {
                 RoundedCornerShape(topStart = 22.dp, topEnd = 6.dp, bottomStart = 22.dp, bottomEnd = 22.dp)
             } else {
@@ -1234,7 +1241,9 @@ private fun MessageBubble(message: ChatMessage, phase: GenerationPhase?, onOpenI
                         )
                         .padding(horizontal = 14.dp, vertical = 11.dp)
                 ) {
-                    if (message.status == MessageStatus.PENDING && message.text.isBlank()) {
+                    if (message.status == MessageStatus.PENDING && message.text.isBlank() && !message.thinking.isNullOrBlank()) {
+                        Text("Formulando a resposta…", color = Muted, fontSize = 13.sp)
+                    } else if (message.status == MessageStatus.PENDING && message.text.isBlank()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TypingDots(color = Neon, dot = 7.dp)
                             Spacer(Modifier.width(10.dp))
@@ -1496,6 +1505,51 @@ private fun VisionDialog(
     )
 }
 
+/** Caixa recolhível com o que a IA pensou antes de responder. */
+@Composable
+private fun ThinkingCard(text: String, live: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    val expanded = open || live
+    Column(
+        modifier = Modifier
+            .widthIn(max = 300.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(VioletDeep.copy(alpha = 0.18f))
+            .border(1.dp, Violet.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+            .clickable(enabled = !live) { open = !open }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("💭", fontSize = 14.sp)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (live) "Pensando…" else "Raciocínio da IA",
+                color = Neon,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (live) {
+                Spacer(Modifier.width(8.dp))
+                TypingDots(color = Neon, dot = 5.dp)
+            } else {
+                Spacer(Modifier.width(6.dp))
+                Text(if (expanded) "▲ ocultar" else "▼ ver detalhes", color = Muted, fontSize = 11.sp)
+            }
+        }
+        AnimatedVisibility(visible = expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            Text(
+                // Durante a geração mostra só o fim, para não empurrar a tela.
+                if (live && text.length > 600) "…" + text.takeLast(600) else text,
+                color = Muted,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun HistoryDrawer(
     state: UiState,
@@ -1503,7 +1557,8 @@ private fun HistoryDrawer(
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
     onDeleteLegacy: () -> Unit,
-    onVision: () -> Unit
+    onVision: () -> Unit,
+    onToggleThinking: (Boolean) -> Unit
 ) {
     val dateFormat = remember { SimpleDateFormat("dd/MM HH:mm", Locale("pt", "BR")) }
     var confirmLegacy by remember { mutableStateOf(false) }
@@ -1636,6 +1691,29 @@ private fun HistoryDrawer(
                 Text(visionTitle, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Text(visionSub, color = Muted, fontSize = 11.sp)
             }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(1.dp, Violet.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                .clickable { onToggleThinking(!state.showThinking) }
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+            Text("💭", fontSize = 20.sp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Mostrar raciocínio", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Respostas melhores, porém mais lentas", color = Muted, fontSize = 11.sp)
+            }
+            androidx.compose.material3.Switch(
+                checked = state.showThinking,
+                onCheckedChange = onToggleThinking,
+                colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = Violet)
+            )
         }
 
         if (state.legacyModelBytes > 0) {

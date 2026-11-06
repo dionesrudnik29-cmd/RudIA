@@ -63,6 +63,7 @@ class ChatStore(context: Context) {
                         .apply {
                             m.imagePath?.let { put("imagePath", it) }
                             m.imageDescription?.let { put("imageDescription", it) }
+                            m.thinking?.let { put("thinking", it) }
                         }
                 )
             }
@@ -96,7 +97,8 @@ class ChatStore(context: Context) {
                         status = runCatching { MessageStatus.valueOf(m.optString("status")) }
                             .getOrDefault(MessageStatus.DONE),
                         imagePath = m.optString("imagePath", "").ifBlank { null },
-                        imageDescription = m.optString("imageDescription", "").ifBlank { null }
+                        imageDescription = m.optString("imageDescription", "").ifBlank { null },
+                        thinking = m.optString("thinking", "").ifBlank { null }
                     )
                 }
             )

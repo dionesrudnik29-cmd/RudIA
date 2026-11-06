@@ -21,7 +21,9 @@ data class ChatMessage(
     /** Foto enviada junto com a mensagem (arquivo no armazenamento do app). */
     val imagePath: String? = null,
     /** O que o leitor de imagens viu na foto; reaproveitado nas perguntas seguintes. */
-    val imageDescription: String? = null
+    val imageDescription: String? = null,
+    /** O raciocínio da IA antes de responder (modo "mostrar pensamento"). */
+    val thinking: String? = null
 )
 
 data class Conversation(

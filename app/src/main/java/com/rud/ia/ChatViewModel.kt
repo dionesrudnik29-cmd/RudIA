@@ -55,6 +55,8 @@ data class UiState(
     val attachment: String? = null,
     val preparingAttachment: Boolean = false,
     val phase: GenerationPhase? = null,
+    /** Mostrar o raciocínio da IA antes da resposta. */
+    val showThinking: Boolean = true,
     /** Aviso curto para mostrar na tela (consumido pela interface). */
     val notice: String? = null
 ) {
@@ -73,11 +75,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var visionJob: Job? = null
     private var generationJob: Job? = null
     private val imagesDir = ImageTools.imagesDir(app)
+    private val prefs = app.getSharedPreferences("rudia_prefs", android.content.Context.MODE_PRIVATE)
+
+    fun setShowThinking(on: Boolean) {
+        prefs.edit().putBoolean("show_thinking", on).apply()
+        _state.update { it.copy(showThinking = on) }
+    }
 
     @Volatile
     private var stopRequested = false
 
     init {
+        _state.update { it.copy(showThinking = prefs.getBoolean("show_thinking", true)) }
         viewModelScope.launch {
             // 1) Restaura o histórico salvo no aparelho.
             val saved = store.load().map { c ->
@@ -326,6 +335,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         persist()
 
+        val think = _state.value.showThinking
         generationJob = viewModelScope.launch {
             var finalText = ""
             var status = MessageStatus.DONE
@@ -345,20 +355,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         _state.update { it.copy(phase = GenerationPhase.THINKING) }
                     }
                     val ctx = engine.contextSize
-                    val maxNew = PromptBuilder.maxNewTokens(ctx)
+                    val maxNew = PromptBuilder.maxNewTokens(ctx, think)
                     val fullPrompt = PromptBuilder.build(
                         history = history,
                         userText = prompt,
                         contextSize = ctx,
                         maxNewTokens = maxNew,
                         countTokens = { engine.countTokens(it) },
-                        imageDescription = description
+                        imageDescription = description,
+                        thinking = think
                     )
                     val raw = engine.generate(fullPrompt, maxNew) { partial ->
-                        val shown = PromptBuilder.clean(partial)
-                        updateMessage(convId, botMsg.id) { it.copy(text = shown) }
+                        if (think) {
+                            val (t, a) = PromptBuilder.splitThinking(partial)
+                            updateMessage(convId, botMsg.id) { it.copy(thinking = t.ifBlank { null }, text = a) }
+                        } else {
+                            val shown = PromptBuilder.clean(partial)
+                            updateMessage(convId, botMsg.id) { it.copy(text = shown) }
+                        }
                     }
-                    PromptBuilder.clean(raw).trimEnd()
+                    if (think) {
+                        val (t, a) = PromptBuilder.splitThinking(raw)
+                        updateMessage(convId, botMsg.id) { it.copy(thinking = t.ifBlank { null }) }
+                        a.trimEnd()
+                    } else PromptBuilder.clean(raw).trimEnd()
                 }
                 if (stopRequested) status = MessageStatus.STOPPED
                 if (finalText.isBlank()) {
